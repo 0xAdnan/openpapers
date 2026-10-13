@@ -119,7 +119,3 @@ npm run data:refresh   # rebuild the bundled paper snapshot
 ## License
 
 Source code is released under the [MIT License](LICENSE).
-
-Semantic Scholar data is governed by its [API License Agreement](https://www.semanticscholar.org/product/api/license). Bundled fonts and dependencies keep their own licenses.
-
-Open Papers is an independent project and is not affiliated with or endorsed by Connected Papers.
