@@ -52,12 +52,14 @@ test('PostgreSQL durable graph store', { skip: !process.env.GRAPH_TEST_DATABASE_
   const rootUrl = process.env.GRAPH_TEST_DATABASE_URL!;
   assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(new URL(rootUrl).hostname), 'Database tests require an explicitly supplied local PostgreSQL instance');
   const admin = new pg.Pool(graphPostgresPoolConfig(rootUrl, { max: 1 }));
+  admin.on('error', () => {});
   const databaseName = `openpapers_test_${randomUUID().replaceAll('-', '')}`;
   await admin.query(`CREATE DATABASE "${databaseName}"`);
   const url = new URL(rootUrl);
   url.pathname = `/${databaseName}`;
   const databaseUrl = url.toString();
   const sql = new pg.Pool(graphPostgresPoolConfig(databaseUrl, { max: 2 }));
+  sql.on('error', () => {});
   t.after(async () => {
     await sql.end();
     try { await admin.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`); }
