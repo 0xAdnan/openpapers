@@ -191,7 +191,7 @@ test('PostgreSQL graph runner and Express job integration', { skip: !process.env
     const tables = await sql.query(`SELECT c.relname, c.relrowsecurity, pg_get_userbyid(c.relowner) AS owner,
       EXISTS (SELECT 1 FROM aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) WHERE grantee = 0) AS public_access
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'openpapers' AND c.relkind = 'r'`);
-    assert.equal(tables.rows.length, 5);
+    assert.equal(tables.rows.length, 6);
     for (const row of tables.rows) {
       assert.equal(row.owner, 'postgres'); assert.equal(row.relrowsecurity, true); assert.equal(row.public_access, false);
     }
