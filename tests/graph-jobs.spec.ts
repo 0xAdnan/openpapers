@@ -69,7 +69,10 @@ test.describe('Graph jobs UI integration fixtures (not research metadata)', () =
   test('unavailable jobs keep the real 40-paper quick graph without an expansion button or notice', async ({ page }) => {
     const calls = await mockConfig(page, { available: false, persistence: 'none' });
     let posts = 0;
-    page.on('request', request => { if (request.method() === 'POST') posts++; });
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (request.method() === 'POST' && url.pathname === '/api/graph-jobs') posts++;
+    });
     await quickGraph(page);
     await expect.poll(calls).toBe(1);
     await expect(banner(page)).toHaveCount(0);
