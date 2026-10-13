@@ -7,10 +7,10 @@ import { ApiError, PaperService } from './service.ts';
 import { SemanticService } from './semantic-service.ts';
 import { PAPER_ID_PATTERN, paperProvider, providerName, type ProviderId } from '../shared/providers.ts';
 
-export function createApp(options: { service?: PaperService; semanticService?: SemanticService; defaultProvider?: ProviderId; offline?: boolean; rateLimit?: number; distPath?: string; requestTimeoutMs?: number } = {}) {
+export function createApp(options: { service?: PaperService; semanticService?: SemanticService; defaultProvider?: ProviderId; offline?: boolean; rateLimit?: number; distPath?: string; requestTimeoutMs?: number; cacheDirectory?: string; snapshotPath?: string; maxResponseBytes?: number } = {}) {
   const offline = options.offline ?? /^(1|true)$/i.test(process.env.OFFLINE ?? '');
-  const cache = new PersistentCache(fileURLToPath(new URL('../.cache/', import.meta.url)));
-  const service = options.service ?? new PaperService(cache, offline);
+  const cache = new PersistentCache(options.cacheDirectory ?? fileURLToPath(new URL('../.cache/', import.meta.url)));
+  const service = options.service ?? new PaperService(cache, offline, undefined, options.snapshotPath);
   const semanticService = options.semanticService ?? new SemanticService(cache, offline);
   const configuredProvider = options.defaultProvider ?? process.env.DEFAULT_PROVIDER ?? 'openalex';
   if (configuredProvider !== 'openalex' && configuredProvider !== 'semantic-scholar') throw new Error('DEFAULT_PROVIDER must be openalex or semantic-scholar');
@@ -27,6 +27,15 @@ export function createApp(options: { service?: PaperService; semanticService?: S
   const clients = new Map<string, { count: number; reset: number }>();
   let active = 0;
   app.use('/api', (req, res, next) => {
+    if (options.maxResponseBytes) {
+      const json = res.json.bind(res);
+      res.json = body => {
+        if (Buffer.byteLength(JSON.stringify(body)) > options.maxResponseBytes!) {
+          return json.call(res.status(413), { error: 'This graph exceeds the deployment response limit. Try a single origin or a smaller research neighborhood.' });
+        }
+        return json(body);
+      };
+    }
     res.set('Cache-Control', 'no-store');
     if (req.originalUrl.length > 2048) return res.status(414).json({ error: 'Request URL is too long' });
     const now = Date.now();

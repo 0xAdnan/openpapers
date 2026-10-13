@@ -24,6 +24,8 @@ npm start
 
 Open `http://127.0.0.1:3001`. Express serves the built frontend and API together. Route reloads work without another web server.
 
+Hosted deployment: https://openpapers-psi.vercel.app. The custom domain `openpapers.si` is attached in Vercel but requires its Cloudflare DNS routing record before it is reachable.
+
 Guaranteed offline provider operation:
 
 ```sh
@@ -130,6 +132,21 @@ If local Chrome is absent, run `npx playwright install chromium` first; the test
 | `rea/` | Local-only user-added toolkit, excluded from the published app repository |
 
 ## Deployment And Privacy
+
+### Vercel
+
+The `openpapers` project under `0xadnans-projects` hosts the Vite frontend and a same-origin Express API function. `npm run build:vercel` bundles backend TypeScript into `.generated/server.mjs`; `api/index.mjs` initializes it with the bundled snapshot and a writable temporary cache. `vercel.json` preserves API JSON routes, SPA deep links, and static security headers. Backend bundling is required because the function compiler does not rewrite the application's `.ts` dependency imports automatically.
+
+```sh
+npx vercel link --project openpapers --scope 0xadnans-projects
+npx vercel deploy --prod --scope 0xadnans-projects
+```
+
+Configure provider keys as sensitive server environment variables in Vercel. The OpenAlex key is configured for Production and Preview. It is not part of the browser bundle or repository. Function storage is ephemeral, not a durable cross-instance cache; provider pacing, IP admission and budgets are process-local. Configure shared enforcement/storage before high-traffic use. Graph responses exceeding the 4 MiB application cap return an actionable JSON error rather than exceeding Vercel's response limit.
+
+Cloudflare DNS for `openpapers.si`: use the project-specific CNAME destination returned by `vercel domains verify`; keep proxying disabled (DNS only). Preserve unrelated MX/TXT records. The Vercel GitHub integration must have access to `0xAdnan/openpapers` before `vercel git connect` can enable automatic deployments. The initial site was deployed through the CLI, not an automatic Git push.
+
+### Container
 
 Container build: `docker build -t open-papers .`, then `docker run --rm -p 3001:3001 -e OFFLINE=1 open-papers`. For live search, omit `OFFLINE=1` and supply server-only provider keys as needed. Set `DEFAULT_PROVIDER=semantic-scholar` to change the initial search source.
 
