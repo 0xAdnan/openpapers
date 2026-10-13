@@ -19,7 +19,6 @@ export function createApp(options: { service?: PaperService; semanticService?: S
   const service = options.service ?? new PaperService(cache, offline, undefined, options.snapshotPath);
   const semanticService = options.semanticService ?? new SemanticService(cache, offline);
   const jobStore = options.jobStore ?? (process.env.DATABASE_URL && !offline ? new PostgresGraphStore() : undefined);
-  jobStore?.ready.catch(() => {});
   const jobRunner = options.jobRunner ?? (jobStore ? new GraphJobRunner(jobStore,
     new OpenAlexProvider({ cache, apiKey: process.env.PAPERS_API_KEY, maxRequests: 1500 })) : undefined);
   const background = options.background ?? ((task: Promise<unknown>) => { void task.catch(() => {}); });
@@ -115,11 +114,12 @@ export function createApp(options: { service?: PaperService; semanticService?: S
       try {
         await jobStore!.ready;
       } catch (err) {
-        console.error('jobStore ready error on config check:', err instanceof Error ? err.stack ?? err.message : err);
+        const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
+        const name = err instanceof Error ? err.name : undefined;
+        console.error('Graph database readiness failed:', typeof code === 'string' && /^[A-Z0-9_]{1,40}$/.test(code) ? code
+          : typeof name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(name) ? name : 'UnknownError');
         available = false;
       }
-    } else {
-      console.warn('jobStore not available. DATABASE_URL present:', Boolean(process.env.DATABASE_URL), 'offline:', offline);
     }
     if (!res.writableEnded) res.json({ available, candidateBudget, maxCandidateBudget: 50000, requestBudget,
       persistence: available ? 'postgres' : 'none' });

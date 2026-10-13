@@ -98,7 +98,7 @@ function publicJob(row: Row): GraphJob {
 }
 
 export class PostgresGraphStore implements GraphJobStore {
-  readonly ready: Promise<void>;
+  private readiness?: Promise<void>;
   private readonly pool: pg.Pool;
   private closing?: Promise<void>;
   private readonly limits: Required<Omit<PostgresGraphStoreOptions, 'max' | 'ca'>>;
@@ -119,14 +119,20 @@ export class PostgresGraphStore implements GraphJobStore {
     this.pool = new pg.Pool(graphPostgresPoolConfig(databaseUrl, { ...options, ca: options.ca ?? process.env.GRAPH_DATABASE_CA }));
     // Idle connection errors must not crash the process or leak a connection URL.
     this.pool.on('error', () => {});
-    this.ready = this.pool.query(`SELECT version,
+  }
+
+  get ready(): Promise<void> {
+    if (this.closing) return Promise.reject(new Error('Graph database store is closed'));
+    // Share in-flight/successful checks; a failure permits only the next caller to retry.
+    return this.readiness ??= this.pool.query(`SELECT version,
       to_regclass('openpapers.graph_jobs') IS NOT NULL AND to_regclass('openpapers.job_papers') IS NOT NULL
         AND to_regclass('openpapers.job_references') IS NOT NULL AND to_regclass('openpapers.provider_budget') IS NOT NULL
         AND to_regclass('openpapers.graph_admission') IS NOT NULL
         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'openpapers'
           AND table_name = 'graph_jobs' AND column_name = 'caller_key') AS present
       FROM openpapers.schema_migrations WHERE version = $1`, [MIGRATION])
-      .then(({ rows }) => { if (!rows.length || !rows[0].present) throw new Error('Graph database migration is missing'); });
+      .then(({ rows }) => { if (!rows.length || !rows[0].present) throw new Error('Graph database migration is missing'); })
+      .catch(error => { this.readiness = undefined; throw error; });
   }
 
   private async transaction<T>(fn: (client: PoolClient) => Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -418,7 +424,7 @@ export class PostgresGraphStore implements GraphJobStore {
   }
 
   close(): Promise<void> {
-    return this.closing ??= this.ready.catch(() => {}).then(() => this.pool.end());
+    return this.closing ??= (this.readiness ?? Promise.resolve()).catch(() => {}).then(() => this.pool.end());
   }
 }
 
