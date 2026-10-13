@@ -33,8 +33,13 @@ export function createApp(options: { service?: PaperService; semanticService?: S
   app.set('query parser', 'simple');
   app.set('trust proxy', false);
   app.use(helmet({ contentSecurityPolicy: { directives: {
-    defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'"],
-    imgSrc: ["'self'", 'data:'], connectSrc: ["'self'"], fontSrc: ["'self'"], objectSrc: ["'none'"],
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'", 'https://www.googletagmanager.com', "'unsafe-inline'"],
+    styleSrc: ["'self'", "'unsafe-inline'"],
+    imgSrc: ["'self'", 'data:', 'https://www.google-analytics.com', 'https://*.google-analytics.com', 'https://*.googletagmanager.com'],
+    connectSrc: ["'self'", 'https://www.google-analytics.com', 'https://*.google-analytics.com', 'https://*.analytics.google.com', 'https://*.googletagmanager.com'],
+    fontSrc: ["'self'"],
+    objectSrc: ["'none'"],
     upgradeInsecureRequests: null,
   } } }));
   const clients = new Map<string, { count: number; reset: number }>();
