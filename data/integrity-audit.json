@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "observedOn": "2026-10-13",
+  "snapshotSha256": "0eec0ed66b06d64cb2d0ffb221829e60f392fcb8f0f84bca5c079f3ef7c6ee82",
+  "method": "Independent HTTPS webfetch requests bypassing application mapping and caches. Projected observations, not retained raw HTTP bodies or original-response hashes. No PDFs, other provider APIs or refresh network calls.",
+  "openAlexRequests": [
+    {
+      "url": "https://api.openalex.org/works?filter=openalex_id:W2626778328%7CW2965373594%7CW2964121744%7CW4385245566&per_page=10&select=id,doi,display_name,publication_year,cited_by_count,authorships,primary_location,referenced_works",
+      "count": 4,
+      "purpose": "Compare all four suspect IDs with snapshot in one live request"
+    },
+    {
+      "url": "https://api.openalex.org/works?filter=doi:https://doi.org/10.48550/arXiv.1706.03762&per_page=5&select=id,doi,display_name,publication_year,cited_by_count,primary_location",
+      "count": 1,
+      "returnedIds": ["W2626778328"],
+      "purpose": "Reproduce queried DOI versus canonical returned DOI conflict"
+    },
+    {
+      "url": "https://api.openalex.org/works?search=Attention%20Is%20All%20You%20Need&filter=publication_year:2017&per_page=5&select=id,doi,display_name,publication_year,cited_by_count,primary_location",
+      "count": 120345,
+      "returnedIds": ["W3017191411", "W2611867013", "W3093398560", "W2593110912", "W2591446726"],
+      "purpose": "Bounded replacement search; generic full-text search returned unrelated results and cannot establish identity"
+    },
+    {
+      "url": "https://api.openalex.org/works?filter=title.search:%22Attention%20Is%20All%20You%20Need%22,publication_year:2017&per_page=5&select=id,doi,display_name,publication_year,cited_by_count,primary_location",
+      "count": 0,
+      "returnedIds": [],
+      "purpose": "Title phrase and expected-year replacement lookup; not proof that no correct record exists anywhere"
+    }
+  ],
+  "records": [
+    {
+      "id": "W2626778328",
+      "liveTitle": "Attention Is All You Need",
+      "liveDoi": "https://doi.org/10.65215/2q58a426",
+      "liveYear": 2025,
+      "liveCitations": 24351,
+      "liveReferenceCount": 28,
+      "snapshotTitleDoiYearCitationsReferenceCountAgreeWithLive": true,
+      "authoritativeSource": "https://arxiv.org/abs/1706.03762",
+      "authoritativeObservation": "Attention Is All You Need, Ashish Vaswani and seven coauthors, first submitted 12 June 2017; arXiv-issued DOI 10.48550/arXiv.1706.03762; most recent revision 2 August 2023.",
+      "finding": "Live DOI filter returns a different canonical DOI and year. Provider/source consistency problem, not local cache or ID-map explanation for these fields. Does not establish whether a legitimate repost was merged or why."
+    },
+    {
+      "id": "W2965373594",
+      "liveTitle": "HISTORIAE, History of Socio-Cultural Transformation as Linguistic Data Science. A Humanities Use Case",
+      "liveDoi": "https://doi.org/10.4230/lipics.cp.2025.31",
+      "liveYear": 2019,
+      "liveCitations": 16484,
+      "liveReferenceCount": 45,
+      "snapshotTitleDoiYearCitationsReferenceCountAgreeWithLive": true,
+      "liveLandingPage": "http://arxiv.org/abs/1907.11692",
+      "authoritativeSource": "https://arxiv.org/abs/1907.11692",
+      "authoritativeObservation": "RoBERTa: A Robustly Optimized BERT Pretraining Approach, Yinhan Liu and nine coauthors, submitted 26 July 2019; DOI 10.48550/arXiv.1907.11692. Live OpenAlex author list agrees with these authors, not its returned HISTORIAE title.",
+      "finding": "Returned title/DOI conflicts with returned landing-page identity. No replacement OpenAlex record verified; metadata not changed."
+    },
+    {
+      "id": "W2964121744",
+      "liveTitle": "AutoResearch Lite: a reproducible paper-inspired experiment runner (Adam mechanism reproduction and convergence-speed comparison)",
+      "liveDoi": "https://doi.org/10.4230/oasics.dx.2026.15",
+      "liveYear": 2026,
+      "liveCitations": 45793,
+      "liveReferenceCount": 0,
+      "snapshotTitleDoiYearCitationsReferenceCountAgreeWithLive": true,
+      "liveLandingPage": "https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.DNA.28.4",
+      "authoritativeSource": "https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.DNA.28.4",
+      "authoritativeObservation": "Exploring Material Design Space with a Deep-Learning Guided Genetic Algorithm, Kuan-Lin Chen and Rebecca Schulman, published 4 August 2022; DOI 10.4230/LIPIcs.DNA.28.4.",
+      "finding": "Returned title, DOI, year and authors conflict with returned landing-page record. Do not infer Adam identity from an old-looking ID or citation neighborhood."
+    },
+    {
+      "id": "W4385245566",
+      "liveTitle": "Exploiting Generative AI to Scale up Intelligent Tutoring Systems",
+      "liveDoi": "https://doi.org/10.4230/lipics.itp.2023.19",
+      "liveYear": 2023,
+      "liveCitations": 76662,
+      "liveReferenceCount": 0,
+      "snapshotTitleDoiYearCitationsReferenceCountAgreeWithLive": true,
+      "liveLandingPage": "https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.ITP.2023.19",
+      "authoritativeSource": "https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.ITP.2023.19",
+      "authoritativeObservation": "MizAR 60 for Mizar 50, Jan Jakubuv and eight coauthors, published 26 July 2023; DOI 10.4230/LIPIcs.ITP.2023.19. Live OpenAlex author list agrees with publisher record, not returned tutoring title.",
+      "finding": "Returned title conflicts with publisher DOI identity. High graph co-citation is derived from incoming references in acquired sample, not outgoing references or title semantics. Individual citing relationships were not independently verified."
+    }
+  ],
+  "decision": {
+    "replacementOpenAlexId": null,
+    "snapshotRegenerated": false,
+    "metadataCorrected": false,
+    "rankingsChanged": false,
+    "reason": "No independently verified alternative OpenAlex 2017 origin found within four-call budget. Retain provider metadata, examples and IDs. Warn explicitly and fail future refreshes on conflicting seed identity."
+  }
+}

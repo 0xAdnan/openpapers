@@ -1,0 +1,975 @@
+{
+  "checkedAt": "2026-10-13T07:33:44.886Z",
+  "snapshotReplaced": false,
+  "seed": {
+    "doi": "10.48550/arXiv.1706.03762",
+    "field": "Machine Learning",
+    "expectedYear": 2017,
+    "expectedTitlePattern": "attention is all you need"
+  },
+  "warning": "Data integrity warning: seed DOI 10.48550/arxiv.1706.03762 (expected year 2017, title matching attention is all you need) resolved to OpenAlex W2626778328, \"Attention Is All You Need\", DOI 10.65215/2q58a426, year 2025. Returned provider metadata is retained; this is not a verified match to the seed publication. Citation relationships are provider-reported, not independently verified scholarly facts.",
+  "returnedRecords": [
+    {
+      "id": "https://openalex.org/W2626778328",
+      "doi": "https://doi.org/10.65215/2q58a426",
+      "display_name": "Attention Is All You Need",
+      "publication_year": 2025,
+      "authorships": [
+        {
+          "author_position": "first",
+          "author": {
+            "id": "https://openalex.org/A5103024730",
+            "display_name": "Ashish Vaswani",
+            "orcid": "https://orcid.org/0000-0002-7794-2085",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-7794-2085"
+            ]
+          },
+          "institutions": [
+            {
+              "id": "https://openalex.org/I1291425158",
+              "display_name": "Google (United States)",
+              "ror": "https://ror.org/00njsd438",
+              "country_code": "US",
+              "type": "company",
+              "lineage": [
+                "https://openalex.org/I1291425158",
+                "https://openalex.org/I4210128969"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "raw_author_name": "Ashish Vaswani",
+          "raw_affiliation_strings": [
+            "Google Brain",
+            "Google (United States), Mountain View, United States"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Google Brain",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            },
+            {
+              "raw_affiliation_string": "Google (United States), Mountain View, United States",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5021878400",
+            "display_name": "Noam Shazeer",
+            "orcid": null,
+            "observed_orcids": []
+          },
+          "institutions": [
+            {
+              "id": "https://openalex.org/I1291425158",
+              "display_name": "Google (United States)",
+              "ror": "https://ror.org/00njsd438",
+              "country_code": "US",
+              "type": "company",
+              "lineage": [
+                "https://openalex.org/I1291425158",
+                "https://openalex.org/I4210128969"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "raw_author_name": "Noam Shazeer",
+          "raw_affiliation_strings": [
+            "Google Brain",
+            "Google (United States), Mountain View, United States"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Google Brain",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            },
+            {
+              "raw_affiliation_string": "Google (United States), Mountain View, United States",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5005777963",
+            "display_name": "Niki Jitendra Parmar",
+            "orcid": null,
+            "observed_orcids": []
+          },
+          "institutions": [
+            {
+              "id": "https://openalex.org/I1174212",
+              "display_name": "University of Southern California",
+              "ror": "https://ror.org/03taz7m60",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I1174212"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I1291425158",
+              "display_name": "Google (United States)",
+              "ror": "https://ror.org/00njsd438",
+              "country_code": "US",
+              "type": "company",
+              "lineage": [
+                "https://openalex.org/I1291425158",
+                "https://openalex.org/I4210128969"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "raw_author_name": "Niki Parmar",
+          "raw_affiliation_strings": [
+            "Google Research",
+            "University of Southern California, Los Angeles, United States"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Google Research",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            },
+            {
+              "raw_affiliation_string": "University of Southern California, Los Angeles, United States",
+              "institution_ids": [
+                "https://openalex.org/I1174212"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5022416424",
+            "display_name": "Jakob Uszkoreit",
+            "orcid": "https://orcid.org/0000-0001-5066-7530",
+            "observed_orcids": [
+              "https://orcid.org/0000-0001-5066-7530"
+            ]
+          },
+          "institutions": [
+            {
+              "id": "https://openalex.org/I1291425158",
+              "display_name": "Google (United States)",
+              "ror": "https://ror.org/00njsd438",
+              "country_code": "US",
+              "type": "company",
+              "lineage": [
+                "https://openalex.org/I1291425158",
+                "https://openalex.org/I4210128969"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "raw_author_name": "Jakob Uszkoreit",
+          "raw_affiliation_strings": [
+            "Google Research",
+            "Google (United States), Mountain View, United States"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Google Research",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            },
+            {
+              "raw_affiliation_string": "Google (United States), Mountain View, United States",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5023448834",
+            "display_name": "Llion Jones",
+            "orcid": null,
+            "observed_orcids": []
+          },
+          "institutions": [
+            {
+              "id": "https://openalex.org/I1291425158",
+              "display_name": "Google (United States)",
+              "ror": "https://ror.org/00njsd438",
+              "country_code": "US",
+              "type": "company",
+              "lineage": [
+                "https://openalex.org/I1291425158",
+                "https://openalex.org/I4210128969"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "raw_author_name": "Llion Jones",
+          "raw_affiliation_strings": [
+            "Google Research",
+            "Google (United States), Mountain View, United States"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Google Research",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            },
+            {
+              "raw_affiliation_string": "Google (United States), Mountain View, United States",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5079288315",
+            "display_name": "Aidan N. Gomez",
+            "orcid": "https://orcid.org/0000-0001-5601-5437",
+            "observed_orcids": [
+              "https://orcid.org/0000-0001-5601-5437"
+            ]
+          },
+          "institutions": [
+            {
+              "id": "https://openalex.org/I1291425158",
+              "display_name": "Google (United States)",
+              "ror": "https://ror.org/00njsd438",
+              "country_code": "US",
+              "type": "company",
+              "lineage": [
+                "https://openalex.org/I1291425158",
+                "https://openalex.org/I4210128969"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I185261750",
+              "display_name": "University of Toronto",
+              "ror": "https://ror.org/03dbr7087",
+              "country_code": "CA",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I185261750"
+              ]
+            }
+          ],
+          "countries": [
+            "CA",
+            "US"
+          ],
+          "is_corresponding": false,
+          "raw_author_name": "Aidan N.Gomez",
+          "raw_affiliation_strings": [
+            "University of Toronto",
+            "Google (United States), Mountain View, United States"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "University of Toronto",
+              "institution_ids": [
+                "https://openalex.org/I185261750"
+              ]
+            },
+            {
+              "raw_affiliation_string": "Google (United States), Mountain View, United States",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5031789995",
+            "display_name": "Łukasz Kaiser",
+            "orcid": "https://orcid.org/0000-0003-1092-6010",
+            "observed_orcids": [
+              "https://orcid.org/0000-0003-1092-6010"
+            ]
+          },
+          "institutions": [
+            {
+              "id": "https://openalex.org/I1291425158",
+              "display_name": "Google (United States)",
+              "ror": "https://ror.org/00njsd438",
+              "country_code": "US",
+              "type": "company",
+              "lineage": [
+                "https://openalex.org/I1291425158",
+                "https://openalex.org/I4210128969"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "raw_author_name": "Lukasz Kaiser",
+          "raw_affiliation_strings": [
+            "Google Brain",
+            "Google (United States), Mountain View, United States"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Google Brain",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            },
+            {
+              "raw_affiliation_string": "Google (United States), Mountain View, United States",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "last",
+          "author": {
+            "id": "https://openalex.org/A5045719436",
+            "display_name": "Illia Polosukhin",
+            "orcid": null,
+            "observed_orcids": []
+          },
+          "institutions": [
+            {
+              "id": "https://openalex.org/I1291425158",
+              "display_name": "Google (United States)",
+              "ror": "https://ror.org/00njsd438",
+              "country_code": "US",
+              "type": "company",
+              "lineage": [
+                "https://openalex.org/I1291425158",
+                "https://openalex.org/I4210128969"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "raw_author_name": "Illia Polosukhin",
+          "raw_affiliation_strings": [
+            "Google (United States), Mountain View, United States"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Google (United States), Mountain View, United States",
+              "institution_ids": [
+                "https://openalex.org/I1291425158"
+              ]
+            }
+          ]
+        }
+      ],
+      "primary_location": {
+        "id": "doi:10.65215/2q58a426",
+        "doi": "https://doi.org/10.65215/2q58a426",
+        "is_oa": false,
+        "landing_page_url": "https://doi.org/10.65215/2q58a426",
+        "pdf_url": null,
+        "source": null,
+        "license": null,
+        "license_id": null,
+        "version": "acceptedVersion",
+        "is_accepted": true,
+        "is_published": false,
+        "raw_source_name": null,
+        "raw_type": "posted-content"
+      },
+      "best_oa_location": {
+        "id": "doi:10.65215/r5bs2d54",
+        "doi": "https://doi.org/10.65215/r5bs2d54",
+        "is_oa": true,
+        "landing_page_url": "https://doi.org/10.65215/r5bs2d54",
+        "pdf_url": "https://langtaosha.org.cn/index.php/lts/preprint/download/10/108",
+        "source": null,
+        "license": null,
+        "license_id": null,
+        "version": "acceptedVersion",
+        "is_accepted": true,
+        "is_published": false,
+        "raw_source_name": null,
+        "raw_type": "posted-content"
+      },
+      "open_access": {
+        "is_oa": true,
+        "oa_status": "gold",
+        "oa_url": "https://langtaosha.org.cn/index.php/lts/preprint/download/10/108",
+        "any_repository_has_fulltext": true
+      },
+      "cited_by_count": 24351,
+      "referenced_works": [
+        "https://openalex.org/W1632114991",
+        "https://openalex.org/W1810943226",
+        "https://openalex.org/W1902237438",
+        "https://openalex.org/W2113691817",
+        "https://openalex.org/W2126433015",
+        "https://openalex.org/W2139621418",
+        "https://openalex.org/W2163568299",
+        "https://openalex.org/W2173051530",
+        "https://openalex.org/W2194775991",
+        "https://openalex.org/W2259472270",
+        "https://openalex.org/W2267186426",
+        "https://openalex.org/W2289899728",
+        "https://openalex.org/W2514713644",
+        "https://openalex.org/W2525778437",
+        "https://openalex.org/W2545625743",
+        "https://openalex.org/W2594990650",
+        "https://openalex.org/W2605203995",
+        "https://openalex.org/W2612675303",
+        "https://openalex.org/W2613904329",
+        "https://openalex.org/W2949847915",
+        "https://openalex.org/W2951008357",
+        "https://openalex.org/W2951583185",
+        "https://openalex.org/W2952339051",
+        "https://openalex.org/W2962784628",
+        "https://openalex.org/W2963069010",
+        "https://openalex.org/W2963991316",
+        "https://openalex.org/W2964121744",
+        "https://openalex.org/W2964308564"
+      ],
+      "related_works": [
+        "https://openalex.org/W2965373594",
+        "https://openalex.org/W2964308564",
+        "https://openalex.org/W2964121744",
+        "https://openalex.org/W2963341956",
+        "https://openalex.org/W2963091558",
+        "https://openalex.org/W2962784628",
+        "https://openalex.org/W2950577311",
+        "https://openalex.org/W2950133940",
+        "https://openalex.org/W2949888546",
+        "https://openalex.org/W2787560479",
+        "https://openalex.org/W2525778437",
+        "https://openalex.org/W2250539671",
+        "https://openalex.org/W2194775991",
+        "https://openalex.org/W2163605009",
+        "https://openalex.org/W2157331557",
+        "https://openalex.org/W2108598243",
+        "https://openalex.org/W2101105183",
+        "https://openalex.org/W2095705004",
+        "https://openalex.org/W2064675550",
+        "https://openalex.org/W1902237438"
+      ],
+      "abstract_inverted_index": {
+        "2": [
+          99
+        ],
+        "2014": [
+          85,
+          104
+        ],
+        "The": [
+          0,
+          18
+        ],
+        "dominant": [
+          1
+        ],
+        "sequence": [
+          2
+        ],
+        "transduction": [
+          3
+        ],
+        "models": [
+          4,
+          21,
+          60,
+          137
+        ],
+        "are": [
+          5
+        ],
+        "based": [
+          6,
+          41
+        ],
+        "on": [
+          7,
+          43,
+          53,
+          82,
+          124
+        ],
+        "complex": [
+          8
+        ],
+        "recurrent": [
+          9
+        ],
+        "or": [
+          10
+        ],
+        "convolutional": [
+          11
+        ],
+        "neural": [
+          12
+        ],
+        "networks": [
+          13
+        ],
+        "in": [
+          14,
+          64
+        ],
+        "an": [
+          15,
+          29
+        ],
+        "encoder-decoder": [
+          16
+        ],
+        "configuration.": [
+          17
+        ],
+        "best": [
+          19,
+          93,
+          136
+        ],
+        "performing": [
+          20
+        ],
+        "also": [
+          22
+        ],
+        "connect": [
+          23
+        ],
+        "the": [
+          24,
+          39,
+          83,
+          91,
+          102,
+          131,
+          135,
+          139,
+          144
+        ],
+        "encoder": [
+          25
+        ],
+        "and": [
+          26,
+          49,
+          70,
+          162
+        ],
+        "decoder": [
+          27
+        ],
+        "through": [
+          28
+        ],
+        "attention": [
+          30,
+          44
+        ],
+        "mechanism.": [
+          31
+        ],
+        "We": [
+          32,
+          141
+        ],
+        "propose": [
+          33
+        ],
+        "a": [
+          34,
+          111,
+          127
+        ],
+        "new": [
+          35,
+          112
+        ],
+        "simple": [
+          36
+        ],
+        "network": [
+          37
+        ],
+        "architecture,": [
+          38
+        ],
+        "Transformer,": [
+          40
+        ],
+        "solely": [
+          42
+        ],
+        "mechanisms,": [
+          45
+        ],
+        "dispensing": [
+          46
+        ],
+        "with": [
+          47,
+          160
+        ],
+        "recurrence": [
+          48
+        ],
+        "convolutions": [
+          50
+        ],
+        "entirely.": [
+          51
+        ],
+        "Experiments": [
+          52
+        ],
+        "two": [
+          54
+        ],
+        "machine": [
+          55
+        ],
+        "translation": [
+          56,
+          87,
+          106
+        ],
+        "tasks": [
+          57,
+          150
+        ],
+        "show": [
+          58,
+          142
+        ],
+        "these": [
+          59
+        ],
+        "to": [
+          61,
+          75,
+          148,
+          155
+        ],
+        "be": [
+          62
+        ],
+        "superior": [
+          63
+        ],
+        "quality": [
+          65
+        ],
+        "while": [
+          66
+        ],
+        "being": [
+          67
+        ],
+        "more": [
+          68
+        ],
+        "parallelizable": [
+          69
+        ],
+        "requiring": [
+          71
+        ],
+        "significantly": [
+          72
+        ],
+        "less": [
+          73
+        ],
+        "time": [
+          74
+        ],
+        "train.": [
+          76
+        ],
+        "Our": [
+          77
+        ],
+        "model": [
+          78,
+          109
+        ],
+        "achieves": [
+          79
+        ],
+        "28.4": [
+          80
+        ],
+        "BLEU": [
+          81,
+          115
+        ],
+        "WMT": [
+          84,
+          103
+        ],
+        "English-to-German": [
+          86
+        ],
+        "task,": [
+          88,
+          107
+        ],
+        "improving": [
+          89
+        ],
+        "over": [
+          90,
+          98
+        ],
+        "existing": [
+          92
+        ],
+        "results,": [
+          94
+        ],
+        "including": [
+          95
+        ],
+        "ensembles": [
+          96
+        ],
+        "by": [
+          97,
+          151
+        ],
+        "BLEU.": [
+          100
+        ],
+        "On": [
+          101
+        ],
+        "English-to-French": [
+          105
+        ],
+        "our": [
+          108
+        ],
+        "establishes": [
+          110
+        ],
+        "single-model": [
+          113
+        ],
+        "state-of-the-art": [
+          114
+        ],
+        "score": [
+          116
+        ],
+        "of": [
+          117,
+          130,
+          134
+        ],
+        "41.8": [
+          118
+        ],
+        "after": [
+          119
+        ],
+        "training": [
+          120,
+          132,
+          164
+        ],
+        "for": [
+          121
+        ],
+        "3.5": [
+          122
+        ],
+        "days": [
+          123
+        ],
+        "eight": [
+          125
+        ],
+        "GPUs,": [
+          126
+        ],
+        "small": [
+          128
+        ],
+        "fraction": [
+          129
+        ],
+        "costs": [
+          133
+        ],
+        "from": [
+          138
+        ],
+        "literature.": [
+          140
+        ],
+        "that": [
+          143
+        ],
+        "Transformer": [
+          145
+        ],
+        "generalizes": [
+          146
+        ],
+        "well": [
+          147
+        ],
+        "other": [
+          149
+        ],
+        "applying": [
+          152
+        ],
+        "it": [
+          153
+        ],
+        "successfully": [
+          154
+        ],
+        "English": [
+          156
+        ],
+        "constituency": [
+          157
+        ],
+        "parsing": [
+          158
+        ],
+        "both": [
+          159
+        ],
+        "large": [
+          161
+        ],
+        "limited": [
+          163
+        ],
+        "data.": [
+          165
+        ]
+      },
+      "topics": [
+        {
+          "id": "https://openalex.org/T10181",
+          "display_name": "Natural Language Processing Techniques",
+          "score": 0.7821999788284302,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1702",
+            "display_name": "Artificial Intelligence"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T10028",
+          "display_name": "Topic Modeling",
+          "score": 0.19449999928474426,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1702",
+            "display_name": "Artificial Intelligence"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T10201",
+          "display_name": "Speech Recognition and Synthesis",
+          "score": 0.0052999998442828655,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1702",
+            "display_name": "Artificial Intelligence"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        }
+      ]
+    }
+  ],
+  "acquisitions": [
+    {
+      "path": "/works",
+      "params": {
+        "per_page": "20",
+        "page": "1",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics",
+        "filter": "doi:https://doi.org/10.48550/arXiv.1706.03762"
+      },
+      "fetchedAt": "2026-10-13T06:39:36.413Z",
+      "responseSha256": "2ccb0cd151c7e8c0191177913ade935053067f919252b7d45b3082f311a059ef",
+      "hashKind": "reserialized-json",
+      "resultCount": 1,
+      "total": 1,
+      "creditsUsed": null,
+      "fromCache": true
+    }
+  ]
+}

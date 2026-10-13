@@ -1,0 +1,244 @@
+{
+  "version": 1,
+  "generatedAt": "2026-10-13T06:45:24.731Z",
+  "snapshotSha256": "0eec0ed66b06d64cb2d0ffb221829e60f392fcb8f0f84bca5c079f3ef7c6ee82",
+  "requestsMade": 5,
+  "requestLimit": 29,
+  "seedDois": [
+    "10.48550/arXiv.1706.03762",
+    "10.1126/science.1225829",
+    "10.1103/PhysRevLett.116.061102"
+  ],
+  "acquisitions": [
+    {
+      "path": "/works",
+      "params": {
+        "per_page": "20",
+        "page": "1",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics",
+        "filter": "doi:https://doi.org/10.48550/arXiv.1706.03762"
+      },
+      "fetchedAt": "2026-10-13T06:39:36.413Z",
+      "responseSha256": "2ccb0cd151c7e8c0191177913ade935053067f919252b7d45b3082f311a059ef",
+      "hashKind": "reserialized-json",
+      "resultCount": 1,
+      "total": 1,
+      "creditsUsed": null,
+      "fromCache": true
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "openalex_id:W1632114991|W1810943226|W1902237438|W2113691817|W2126433015|W2139621418|W2163568299|W2173051530|W2194775991|W2259472270|W2267186426|W2289899728|W2514713644|W2525778437|W2545625743|W2594990650|W2605203995|W2612675303|W2613904329|W2949847915|W2951008357|W2951583185|W2952339051|W2962784628|W2963069010|W2963991316|W2964121744|W2964308564|W2965373594|W2963341956|W2963091558|W2950577311|W2950133940|W2949888546|W2787560479|W2250539671|W2163605009|W2157331557|W2108598243|W2101105183|W2095705004|W2064675550",
+        "per_page": "100",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:39:37.672Z",
+      "responseSha256": "74f1c597a31c5ee8a469033c69e632e989c058561de617bd5482a808f057fa59",
+      "hashKind": "reserialized-json",
+      "resultCount": 32,
+      "total": 32,
+      "creditsUsed": null,
+      "fromCache": true
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "cites:W2626778328",
+        "sort": "cited_by_count:desc",
+        "per_page": "100",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:39:40.222Z",
+      "responseSha256": "0c28ca67c0fff8ab11749f7c1267ec56a189446ad630adabcbba7e2679f8fbd9",
+      "hashKind": "reserialized-json",
+      "resultCount": 100,
+      "total": 24361,
+      "creditsUsed": null,
+      "fromCache": true
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "cites:W1632114991|W1810943226|W1902237438|W2113691817|W2126433015|W2139621418|W2163568299|W2173051530",
+        "sort": "cited_by_count:desc",
+        "per_page": "50",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:39:41.914Z",
+      "responseSha256": "9568df9fc0883b549cb3a5672c3f17408ed71be5efb138ca2bd82119479228be",
+      "hashKind": "reserialized-json",
+      "resultCount": 50,
+      "total": 19244,
+      "creditsUsed": null,
+      "fromCache": true
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "openalex_id:W6739901393|W4385245566|W2964308564|W1861492603|W2097117768|W2117539524|W2251939518|W4285719527|W1614298861|W2153579005|W1903029394|W2798812533|W1821462560|W2963310665|W1686810756|W1901129140|W2112796928|W2970597249|W2908510526|W2962784628|W639708223|W6755207826|W2549139847|W3118608800|W6784333009|W1753482797|W1836465849|W2110485445|W2170973209|W2183341477|W2565639579|W2919115771|W3034885317|W3082274269|W1677182931|W179875071|W2147800946|W2412782625|W2462831000|W2937843571|W6639102338|W131533222|W1566289585|W1665214252|W2107878631|W2143612262|W2185175083|W2950635152|W2963446712|W2963495494|W3034445277|W3035524453|W3170874841|W6637373629|W6639824700|W6788135285|W1533861849|W1599016936|W1843891098|W1849277567|W1959608418|W2147527908|W2899663614|W2940744433|W2949117887|W2962835968|W2963150697|W2964080601|W2970389371|W2981851019|W2990704537|W3119786062|W6638667902|W6679434410|W6684191040|W6908809|W1544827683|W1840435438|W2104246439|W2131744502|W2131774270|W2147880316|W2158139315|W2519091744|W2799269579|W2890782586|W2942489928|W2963756346|W2970608575|W2981413347|W2982220924|W3005680577|W6679436768|W6778485988|W6778883912|W1026270304|W1486649854|W1535015163|W1815076433|W196214544",
+        "per_page": "100",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:45:06.668Z",
+      "responseSha256": "40debcfb098d722ccc005813c4c6e1a588eb6d7ec83b8e0376075572edeba703",
+      "hashKind": "original-response",
+      "resultCount": 77,
+      "total": 77,
+      "creditsUsed": "1"
+    },
+    {
+      "path": "/works",
+      "params": {
+        "per_page": "20",
+        "page": "1",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics",
+        "filter": "doi:https://doi.org/10.1126/science.1225829"
+      },
+      "fetchedAt": "2026-10-13T06:39:44.319Z",
+      "responseSha256": "80f078d865725ba45169428d51565164abebddcc7690837a85e078a306de9d0e",
+      "hashKind": "reserialized-json",
+      "resultCount": 1,
+      "total": 1,
+      "creditsUsed": null,
+      "fromCache": true
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "openalex_id:W1010047185|W1568438881|W1977531433|W1978094899|W1982969769|W1983008595|W1986718765|W1989568784|W2005328221|W2010986636|W2023761630|W2025074364|W2039375385|W2039731535|W2046563455|W2048071312|W2052192736|W2063148079|W2073084063|W2079458003|W2082997857|W2083381199|W2088154229|W2091312734|W2093050056|W2102822311|W2112006537|W2112295554|W2120503144|W2123196886|W2123965484|W2124741861|W2131527797|W2132821335|W2133464522|W2133501536|W2135598273|W2143407915|W2143772974|W2144634347|W2147416962|W2149751339|W2153537688|W2157838834|W2161606262|W2163241233|W2169244146|W2400032569|W2022419379|W1690029344|W3195673132|W4378347774|W4200553529|W3146454725|W2140658947|W2317788533|W2947638201|W2564226239",
+        "per_page": "100",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:45:09.524Z",
+      "responseSha256": "aad5a32c7d5b5cc0f84bf5d2fab04f321896873e6360484d96c46aff91d8286a",
+      "hashKind": "original-response",
+      "resultCount": 56,
+      "total": 56,
+      "creditsUsed": "1"
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "cites:W2045435533",
+        "sort": "cited_by_count:desc",
+        "per_page": "100",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:39:47.321Z",
+      "responseSha256": "55426690434489b9090bbe6b76347728b02a7445b8cdb3ef56b99ae8f13d8c5c",
+      "hashKind": "reserialized-json",
+      "resultCount": 100,
+      "total": 16910,
+      "creditsUsed": null,
+      "fromCache": true
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "cites:W1010047185|W1568438881|W1977531433|W1978094899|W1982969769|W1983008595|W1986718765|W1989568784",
+        "sort": "cited_by_count:desc",
+        "per_page": "50",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:39:49.621Z",
+      "responseSha256": "a9a41fd0ebb7315d49323d9453d25545ba5e297ed8d5c6abdcde9677b3bdd039",
+      "hashKind": "reserialized-json",
+      "resultCount": 50,
+      "total": 5395,
+      "creditsUsed": null,
+      "fromCache": true
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "openalex_id:W2074862753|W2166139447|W2153355254|W1990487336|W2077190448|W1986171241|W1978129709|W2073873559|W2137209165|W1982846895|W4206892629|W2062008243|W2108101601|W2122836421|W2009626008|W2017721099|W2034048377|W2110260408|W2149480270|W2168933209|W2116565356|W2138993899|W2140494588|W2156319424|W2170255645|W1965404910|W1981160614|W2059363769|W2077379243|W2085436536|W2139544568|W2188223075|W2041797639|W2072051684|W2078308455|W2133702185|W1506494596|W1608084731|W1845461494|W1906155566|W1990379499|W2007153971|W2027591298|W2051395442|W2067853474|W2077381938|W2100226515|W2130069008|W2131395804|W1980449150|W2001497035|W2060573994|W2076785026|W2086155031|W2101788140|W2103081715|W2118746294|W1525072270|W1926535993|W1967999689|W1995867192|W2030994161|W2057964816|W2111648798|W2137409670|W2143208261|W2148050025|W2162900837|W2170241664|W2766599608|W1577973179|W1922040927|W2162049340|W1968140045|W1976508887|W2036632122|W2039316426|W2063668515|W2116534141|W2120932131|W2128758977|W2129194497|W2132401721|W2144081223|W2150798416|W2154186763|W137643597|W1963554509|W1965423091|W1991710875|W2008553597|W2065395033|W2082131511|W2099106733|W2133908827|W2138231299|W2144566978|W2146145436|W2153552126|W2154679217",
+        "per_page": "100",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:45:13.008Z",
+      "responseSha256": "dffaf2f2b687ceff217d72babaace838b0edfec9b2e9e8b1fb47f528082da257",
+      "hashKind": "original-response",
+      "resultCount": 96,
+      "total": 96,
+      "creditsUsed": "1"
+    },
+    {
+      "path": "/works",
+      "params": {
+        "per_page": "20",
+        "page": "1",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics",
+        "filter": "doi:https://doi.org/10.1103/PhysRevLett.116.061102"
+      },
+      "fetchedAt": "2026-10-13T06:39:52.761Z",
+      "responseSha256": "6991d0014dcdc2ef7de8b1ea782b71157e97eeb14705404334491dbf6a82ae7b",
+      "hashKind": "reserialized-json",
+      "resultCount": 1,
+      "total": 1,
+      "creditsUsed": null,
+      "fromCache": true
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "openalex_id:W1134494461|W1537038922|W1891707817|W1930959531|W1965516292|W1966442216|W1969362644|W1971068715|W1971267516|W1978916504|W1983439542|W1989170879|W1989374967|W1990660834|W1990978371|W1994870116|W1995114597|W1996004845|W1997367763|W2004614917|W2007877891|W2014804681|W2014958866|W2018289223|W2019709661|W2034066066|W2035620885|W2036334887|W2036925330|W2037245193|W2037306691|W2037939815|W2038083843|W2039911906|W2041689890|W2044542193|W2048638122|W2049007728|W2050092976|W2051449498|W2051539854|W2051754610|W2052074642|W2052438420|W2055524364|W2055664909|W2060745302|W2061930234|W2062037339|W2062331895|W2063069773|W2069557347|W2070717869|W2070806579|W2071126256|W2073862476|W2074237027|W2077003551|W2084808542|W2094615226|W2095105526|W2097082581|W2097501174|W2102006113|W2104863352|W2108294549|W2113745843|W2115305599|W2115462982|W2116108818|W2121098569|W2127244041|W2138598873|W2147286576|W2148994792|W2151552813|W2153135464|W2158293236|W2158710569|W2172269227|W2214545089|W2245922284|W2262661619|W2263465265|W2266202083|W2268511610|W2272494806|W2291783991|W2292704993|W2565472021|W2738057944|W4385703619|W2383096257|W2300130159|W4301508156|W2678506374|W4327545949|W4307783856|W2784717448|W2101892708",
+        "per_page": "100",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:45:16.786Z",
+      "responseSha256": "444402ee812fd67e0dea34cdef842589df47d98080a7c771442169dde734d0f5",
+      "hashKind": "original-response",
+      "resultCount": 97,
+      "total": 97,
+      "creditsUsed": "1"
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "cites:W2252795400",
+        "sort": "cited_by_count:desc",
+        "per_page": "100",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:39:59.434Z",
+      "responseSha256": "1b28dbe78048776e55999a6c8a9a53b02407132f5ee375d485bde12409e6b9bb",
+      "hashKind": "reserialized-json",
+      "resultCount": 100,
+      "total": 14115,
+      "creditsUsed": null,
+      "fromCache": true
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "cites:W1134494461|W1537038922|W1891707817|W1930959531|W1965516292|W1966442216|W1969362644|W1971068715",
+        "sort": "cited_by_count:desc",
+        "per_page": "50",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:40:03.456Z",
+      "responseSha256": "e6989d8135aa1d5450a805f3300f9075a2d6deab8852ebd37d7ff645a66ebd80",
+      "hashKind": "reserialized-json",
+      "resultCount": 50,
+      "total": 3546,
+      "creditsUsed": null,
+      "fromCache": true
+    },
+    {
+      "path": "/works",
+      "params": {
+        "filter": "openalex_id:W2139823471|W2169650135|W4292875581|W2106532428|W1984734622|W2103931654|W3122428211|W1974046066|W2051952627|W2064816908|W2273772273|W2342129039|W3102004940|W2277737850|W1985536898|W2076480618|W2198581161|W2606613431|W1606642326|W1975884245|W2039964660|W2155802808|W2166436681|W3104042330|W1989323319|W2003018730|W2022385453|W2065913386|W2147686177|W2147829712|W1982649138|W1999658221|W2047446109|W2266746071|W1978411982|W1978501285|W2011301426|W2027859446|W2033106348|W2054085900|W2081895114|W2110117754|W2119896891|W2273686191|W2277521171|W2766627241|W1993183337|W2055344669|W2096077283|W2146829284|W2167572849|W2180637092|W2237829933|W2951135371|W1790289060|W1992161867|W2021142135|W2068696144|W2087010948|W2104494725|W2158571066|W2230262155|W2346432445|W1851600070|W1909359706|W1939611531|W1967852555|W1978615286|W2014560881|W2066813507|W2077007583|W2083366520|W2090568279|W2114922502|W2147698438|W2273991482|W2415259147|W2479210508|W2546409652|W2547616757|W2610217328|W3099131260|W3105401162|W6893850777",
+        "per_page": "100",
+        "select": "id,doi,display_name,publication_year,authorships,primary_location,best_oa_location,open_access,cited_by_count,referenced_works,related_works,abstract_inverted_index,topics"
+      },
+      "fetchedAt": "2026-10-13T06:45:22.844Z",
+      "responseSha256": "6d9d46620f777776e48bfa94fa8cb1703fa5ed4aa4c97b0962103b089ff7a494",
+      "hashKind": "original-response",
+      "resultCount": 79,
+      "total": 79,
+      "creditsUsed": "1"
+    }
+  ],
+  "caveat": "OpenAlex is mutable: the same query can return different data later. Snapshot retains exact normalized fetched metadata and reference identifiers. hashKind identifies original-response versus reserialized-json hashes; snapshot hash covers the normalized bundle. Cached acquisitions retain their original cache time, not this refresh time."
+}

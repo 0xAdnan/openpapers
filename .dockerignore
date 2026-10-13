@@ -1,0 +1,8 @@
+node_modules
+dist
+.cache
+.env*
+rea
+test-results
+playwright-report
+.git
