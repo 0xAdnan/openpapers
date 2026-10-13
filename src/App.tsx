@@ -8,6 +8,10 @@ import { paperProvider, providerRecordUrl, type ProviderId } from '../shared/pro
 import { paperMatchScore, rankPapers } from '../shared/fuzzy';
 import { doiIdentifier } from '../shared/identifiers';
 import GraphCanvas from './components/GraphCanvas';
+import GraphPreview, { type FeaturedPreview } from './components/GraphPreview';
+import featuredPreviews from './featured-previews.json';
+import GraphShare from './components/GraphShare';
+import { graphShareLink } from '../shared/share-link';
 import useGraphJob from './hooks/useGraphJob';
 
 const number = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
@@ -188,11 +192,21 @@ function DecorativeGraph({ side }: { side: 'left' | 'right' }) {
   return <svg className={`decorative-graph ${side}`} viewBox="0 0 320 500" aria-hidden="true"><g stroke="#638083" strokeWidth=".6" opacity=".55">{points.flatMap((point, i) => points.slice(i + 1).filter((_, j) => (i + j) % 3 !== 0).map((other, j) => <line key={`${i}-${j}`} x1={point[0]} y1={point[1]} x2={other[0]} y2={other[1]} />))}</g>{points.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={p[2]} fill={['#16585d', '#6c9699', '#c1d3d3', '#43888b'][i % 4]} opacity=".8" />)}</svg>;
 }
 
+const FEATURED = featuredPreviews as FeaturedPreview[];
+// Each hint runs a real sample search, so readers see which inputs work.
+const SEARCH_HINTS = [
+  { icon: <span className="try-doi" aria-hidden="true">doi</span>, label: 'Paper DOI', query: '10.1002/asi.21525' },
+  { icon: <FileText size={22} aria-hidden="true" />, label: 'arXiv', detail: 'Paper URL', query: 'https://arxiv.org/abs/1706.03762' },
+  { icon: <Search size={22} aria-hidden="true" />, label: 'Paper title', query: 'DeepFruits: A Fruit Detection System Using Deep Neural Networks' },
+  { icon: <Library size={22} aria-hidden="true" />, label: 'PubMed', detail: 'Paper URL', query: 'https://pubmed.ncbi.nlm.nih.gov/23287718/' },
+  { icon: <Network size={22} aria-hidden="true" />, label: 'Keywords', query: 'science mapping' },
+];
+
 function Home() {
-  const { data: examples } = useApi<Example[]>('/api/examples');
+  const { searchProvider } = useContext(ProviderContext);
   return <main id="main">
     <section className="hero">
-      <DecorativeGraph side="left" /><DecorativeGraph side="right" />
+      <div className="hero-decor"><DecorativeGraph side="left" /><DecorativeGraph side="right" /></div>
       <div className="hero-content"><div className="eyebrow"><span className="status-dot" />LITERATURE DISCOVERY, OPEN TO EVERYONE</div>
         <h1>Explore academic papers<br />in a visual graph</h1>
         <p className="hero-subtitle">Start with one paper. Discover the research around it.</p>
@@ -200,9 +214,13 @@ function Home() {
         <p className="search-hint">Free to use. No account or subscription.</p>
       </div>
     </section>
+    <section className="try-section content-width" aria-labelledby="try-heading">
+      <h2 id="try-heading">You can try:</h2>
+      <ul className="try-list">{SEARCH_HINTS.map(hint => <li key={hint.label}><Link to={searchUrl(hint.query, searchProvider ?? 'openalex')} title={`Example: ${hint.query}`}>{hint.icon}<strong>{hint.label}</strong>{hint.detail && <span>{hint.detail}</span>}</Link></li>)}</ul>
+    </section>
     <section className="examples-section content-width" aria-labelledby="examples-heading">
-      <div className="section-top"><h2 id="examples-heading">Start with a paper you know</h2><span>Try an example graph</span></div>
-      <div className="example-grid">{examples?.map((example, i) => <Link className="example-card" key={example.id} to={graphUrl([example.id])}><div className="example-field"><span className="example-number">0{i + 1}</span>{example.field}</div><h3>{example.title}</h3>{example.warning && <span className="example-warning" title={example.warning}><Info size={12} />Metadata conflict</span>}<div className="example-meta">{example.author} · {example.warning ? `${example.year} (source year)` : example.year}<ArrowRight size={20} /></div></Link>)}</div>
+      <div className="section-top"><h2 id="examples-heading">Or start with one of our example graphs</h2></div>
+      <div className="example-grid">{FEATURED.map(example => <Link className="example-card" key={example.id} to={graphUrl([example.id])}><GraphPreview preview={example} /><h3>{example.title} <span className="example-meta">({example.author}, {example.year})</span></h3></Link>)}</div>
     </section>
     <section className="use-cases content-width"><h2>A new perspective on your research</h2><div className="use-case-grid">
       <article><Network size={25} /><h3>Get a visual overview of a field</h3><p>Build a neighborhood around a paper. Similar papers cluster together, helping you see the foundations and directions of a research area.</p></article>
@@ -233,14 +251,14 @@ function SaveButton({ paper, small = false }: { paper: Paper; small?: boolean })
   return <button className={`save-button ${saved ? 'saved' : ''}`} onClick={() => toggle(paper)} aria-label={`${saved ? 'Unsave' : 'Save'} ${paper.title}`} aria-pressed={saved}><Bookmark size={small ? 17 : 19} fill={saved ? 'currentColor' : 'none'} />{!small && (saved ? 'Saved' : 'Save')}</button>;
 }
 
-function PaperLinks({ paper }: { paper: Paper }) {
+function PaperLinks({ paper, bare = false }: { paper: Paper; bare?: boolean }) {
   const pdf = safeUrl(paper.pdfUrl), doi = safeUrl(paper.doi?.startsWith('http') ? paper.doi : paper.doi ? `https://doi.org/${paper.doi}` : null);
-  return <div className="paper-links"><span className="open-in">Open in:</span>{pdf && <a className="open-icon" href={pdf} target="_blank" rel="noreferrer" aria-label={`PDF for ${paper.title}`} title="PDF"><FileText size={15} /></a>}{doi && <a className="open-icon" href={doi} target="_blank" rel="noreferrer" aria-label={`DOI ${doiIdentifier(paper.doi!)}`} title="DOI"><span className="doi-badge">doi</span></a>}<a className="open-icon" href={providerRecordUrl(paper.id)} target="_blank" rel="noreferrer" aria-label={`Source record for ${paper.title}`} title="Source record"><Globe size={15} /></a><a className="open-icon" href={`https://scholar.google.com/scholar?q=${encodeURIComponent(paper.title)}`} target="_blank" rel="noreferrer" aria-label={`Google Scholar for ${paper.title}`} title="Google Scholar"><GraduationCap size={16} /></a></div>;
+  return <div className="paper-links">{!bare && <span className="open-in">Open in:</span>}{pdf && <a className="open-icon" href={pdf} target="_blank" rel="noreferrer" aria-label={`PDF for ${paper.title}`} title="PDF"><FileText size={15} /></a>}{doi && <a className="open-icon" href={doi} target="_blank" rel="noreferrer" aria-label={`DOI ${doiIdentifier(paper.doi!)}`} title="DOI"><span className="doi-badge">doi</span></a>}<a className="open-icon" href={providerRecordUrl(paper.id)} target="_blank" rel="noreferrer" aria-label={`Source record for ${paper.title}`} title="Source record"><Globe size={15} /></a><a className="open-icon" href={`https://scholar.google.com/scholar?q=${encodeURIComponent(paper.title)}`} target="_blank" rel="noreferrer" aria-label={`Google Scholar for ${paper.title}`} title="Google Scholar"><GraduationCap size={16} /></a></div>;
 }
 
 function PaperCard({ paper, children }: { paper: Paper; children?: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
-  return <article className="paper-card"><div className="paper-card-top"><Link to={graphUrl([paper.id])}><h2>{paper.title}</h2></Link><SaveButton paper={paper} small /></div><p className="paper-authors">{authors(paper)}</p><p className="paper-publication">{paper.year ?? 'Year unavailable'}{paper.venue && ` · ${paper.venue}`}</p><div className="paper-stats"><span>{exactNumber.format(paper.citations)} citations</span><span>{paper.references.length} references</span>{paper.openAccess && <span className="oa-label">Open access</span>}</div>{paper.abstract && <><p className={`paper-abstract ${expanded ? 'expanded' : ''}`}>{paper.abstract}</p><button className="text-button" onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Show abstract'}<ChevronDown size={14} /></button></>}<div className="paper-card-bottom"><PaperLinks paper={paper} />{children ?? <Link className="primary small" to={graphUrl([paper.id])}><Network size={16} />Build graph</Link>}</div></article>;
+  return <article className="paper-card"><div className="paper-card-top"><Link to={graphUrl([paper.id])}><h2>{paper.title}</h2></Link></div><p className="paper-authors">{authors(paper)}</p><p className="paper-publication">{paper.venue && `${paper.venue} `}{paper.year ?? 'Year unavailable'}{paper.venue ? '.' : ''}</p><p className="paper-stats">{exactNumber.format(paper.citations)} Citations, {paper.references.length} References{paper.openAccess && <span className="oa-label">Open access</span>}</p><div className="paper-card-bottom"><div className="paper-actions"><Link className="open-icon build-icon" to={graphUrl([paper.id])} aria-label="Build graph" title="Build graph"><Network size={16} /></Link><PaperLinks paper={paper} bare /></div><div className="paper-card-actions">{children}<SaveButton paper={paper} /></div></div>{paper.abstract && <div className="abstract-row"><p className={`paper-abstract ${expanded ? 'expanded' : ''}`}>{paper.abstract}</p><button className="show-more" onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Show more'}</button></div>}</article>;
 }
 
 function SearchPage() {
@@ -252,7 +270,7 @@ function SearchPage() {
   const source = data?.meta.provider ?? provider;
   const lastPage = Math.min(source === 'semantic-scholar' ? 50 : 100, Math.ceil((data?.total ?? 0) / 20));
   const results = rankPapers(query, data?.results ?? []);
-  return <main id="main" className="search-page content-width"><Link className="back-link" to="/"><ArrowLeft size={16} />Back to discovery</Link><h1>Find your starting paper</h1><SearchBox initial={query} /><div className="search-result-heading"><h2>{query ? `Results for “${query}”` : 'Search by title, keyword, or DOI'}</h2>{data && <DataBadge meta={data.meta} />}</div>{loading || (query && searchProvider === undefined && !providerError) ? <Loading /> : error || providerError ? <ErrorState error={error ?? providerError!} /> : data && <>
+  return <main id="main" className="search-page content-width"><Link className="back-link" to="/"><ArrowLeft size={16} />Back to discovery</Link><SearchBox initial={query} />{query && <p className="suggestions-note">Showing paper suggestions for “{query}”.</p>}<div className="search-result-heading"><h1>{query ? 'Choose a paper to build a graph:' : 'Search by title, keyword, or DOI'}</h1>{data && <DataBadge meta={data.meta} />}</div>{loading || (query && searchProvider === undefined && !providerError) ? <Loading /> : error || providerError ? <ErrorState error={error ?? providerError!} /> : data && <>
     <p className="result-count">{exactNumber.format(data.total)} results</p>{data.meta.warning && <div className="notice"><Info size={17} /><p>{data.meta.warning}</p></div>}
     {results.length ? results.map(paper => <PaperCard key={paper.id} paper={paper} />) : <div className="empty-state"><Search size={32} /><h2>No matching papers</h2><p>Try a shorter title, a DOI, or an example graph on the homepage. Offline search only includes bundled and previously cached papers.</p></div>}
     {data.total > data.perPage && <nav className="pagination" aria-label="Search result pages">{page > 1 ? <Link to={searchUrl(query, searchProvider!, page - 1)}><ChevronLeft size={16} />Previous</Link> : <span /> }<span>Page {page} of {lastPage}</span>{page * data.perPage < data.total && page < lastPage ? <Link to={searchUrl(query, searchProvider!, page + 1)}>Next<ChevronRight size={16} /></Link> : <span />}</nav>}
@@ -298,13 +316,14 @@ function Workspace() {
   const data = expansion.result ?? quickData;
   const job = expansion.job;
   const [mobilePane, setMobilePane] = useState<'graph' | 'papers' | 'details'>('graph');
-  const [dialog, setDialog] = useState<'filters' | 'export' | 'data' | 'expand' | null>(null);
+  const [dialog, setDialog] = useState<'filters' | 'export' | 'data' | 'expand' | 'share' | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const { notify } = useContext(LibraryContext);
   useEffect(() => { setMobilePane('graph'); setHoveredId(null); }, [ids, view]);
   useEffect(() => { setDialog(null); }, [ids]);
   const all = data ? [...data.nodes, ...data.prior, ...data.derivative] : [];
   const selected = all.find(p => p.id === params.get('selected')) ?? data?.nodes[0];
+  const detailPaper = all.find(p => p.id === hoveredId) ?? selected;
   const keyword = params.get('keyword')?.toLowerCase() ?? '';
   const min = Number(params.get('from')) || 0, max = Number(params.get('to')) || 9999;
   const filter = (p: Paper) => (!keyword || paperMatchScore(keyword, p) > 0 || `${p.title} ${authors(p)}`.toLowerCase().includes(keyword)) && (!params.has('oa') || p.openAccess) && (!params.has('pdf') || Boolean(p.pdfUrl)) && (p.year === null ? min === 0 && max === 9999 : p.year >= min && p.year <= max);
@@ -317,17 +336,14 @@ function Workspace() {
     if (detail) setMobilePane('details');
   }
   function open(id: string) { navigate(graphUrl([id])); }
-  async function share() {
-    try { await navigator.clipboard.writeText(window.location.href); notify('Graph link copied. It includes your filters and selection.'); }
-    catch { notify('Copy the address from your browser to share this graph.'); }
-  }
+  const shareUrl = data ? graphShareLink(window.location.origin, origins, currentView, params) : '';
   return <main id="main" className="workspace">
     <div className="workspace-toolbar"><Link to="/" className="workspace-back" aria-label="Back to search"><ArrowLeft size={18} /></Link><h1 title={data?.nodes.filter(p => p.isOrigin).map(p => p.title).join(' + ')}>{data?.nodes.filter(p => p.isOrigin).map(p => p.title).join(' + ') || 'Research graph'}</h1><nav className="view-tabs" aria-label="Graph views">
       <Link className={currentView === 'graph' ? 'active' : ''} to={`${graphUrl(origins)}?${params}`}><Network size={17} /><span>Graph</span></Link>
       <Link className={currentView === 'prior' ? 'active' : ''} to={`${graphUrl(origins, 'prior')}?${params}`}><GitBranch size={17} /><span>Prior<span className="desktop-word"> works</span></span></Link>
       <Link className={currentView === 'derivative' ? 'active' : ''} to={`${graphUrl(origins, 'derivative')}?${params}`}><Plus size={17} /><span>Derivative<span className="desktop-word"> works</span></span></Link>
       <Link className={currentView === 'list' ? 'active' : ''} to={`${graphUrl(origins, 'list')}?${params}`}><List size={17} /><span>List<span className="desktop-word"> view</span></span></Link>
-    </nav><div className="workspace-actions"><button className={filterCount ? 'active' : ''} onClick={() => setDialog('filters')} aria-label="Filter papers"><SlidersHorizontal size={18} /><span>Filters{filterCount ? ` (${filterCount})` : ''}</span></button><button onClick={share} aria-label="Share graph"><Share2 size={18} /></button><button onClick={() => setDialog('export')} aria-label="Export graph"><Download size={18} /></button></div></div>
+    </nav><div className="workspace-actions"><button className={filterCount ? 'active' : ''} onClick={() => setDialog('filters')} aria-label="Filter papers"><SlidersHorizontal size={18} /><span>Filters{filterCount ? ` (${filterCount})` : ''}</span></button><button className="graph-share-trigger" onClick={() => setDialog('share')} disabled={!data} aria-label="Share graph"><Share2 size={18} /><span>Share</span></button><button onClick={() => setDialog('export')} aria-label="Export graph"><Download size={18} /></button></div></div>
     {(expansion.available || expansion.id || expansion.creating || expansion.error) && <section className={`jobs-banner ${expansion.error || job?.state === 'failed' ? 'jobs-error' : ''}`} aria-label="Research expansion">
       <div className="jobs-content" role="status" aria-live="polite">
         <strong>{expansion.creating ? 'Starting research expansion...' : !expansion.watching ? 'Research updates hidden' : job ? ({ queued: 'Research expansion queued', running: job.phase === 'acquire' ? 'Acquiring research candidates' : job.phase === 'score' ? 'Scoring acquired candidates' : 'Publishing research graph', paused: 'Research expansion paused', completed: 'Research expansion complete', failed: 'Research expansion failed' }[job.state]) : expansion.id ? 'Resuming research expansion...' : 'Quick graph coverage'}</strong>
@@ -349,20 +365,21 @@ function Workspace() {
         {(expansion.error || job?.state === 'failed') && <button className="text-button" onClick={expansion.forget}>Remove job from view</button>}
       </div>
     </section>}
-    {loading && !data ? <Loading graph /> : error && !data ? <ErrorState error={error} /> : data && selected && <>
+    {loading && !data ? <Loading graph /> : error && !data ? <ErrorState error={error} /> : data && selected && detailPaper && <>
       {data.meta.warning?.includes('Data integrity warning:') && <button className="integrity-notice" onClick={() => setDialog('data')}><Info size={16} /><span>Source metadata conflicts with the seed publication. Review before citing.</span><span className="integrity-more">Details <ChevronRight size={14} /></span></button>}
       <div className="mobile-pane-tabs" role="group" aria-label="Workspace panels"><button className={mobilePane === 'graph' ? 'active' : ''} onClick={() => setMobilePane('graph')}>{currentView === 'graph' ? <Network size={17} /> : <List size={17} />}{currentView === 'graph' ? 'Graph' : 'Results'}</button><button className={mobilePane === 'papers' ? 'active' : ''} onClick={() => setMobilePane('papers')}><Library size={17} />Papers ({filtered.length})</button><button className={mobilePane === 'details' ? 'active' : ''} onClick={() => setMobilePane('details')}><Info size={17} />Details</button></div>
       <div className={`workspace-panels pane-${mobilePane} view-${currentView}`}>
         <aside className="paper-sidebar" aria-label="Graph papers"><div className="panel-heading"><h2>Graph papers</h2><span>{filtered.length}</span></div><div className="paper-sidebar-list">{filtered.map(paper => <button key={paper.id} className={`sidebar-paper ${selected.id === paper.id ? 'selected' : ''} ${paper.isOrigin ? 'origin-paper' : ''}`} onClick={() => select(paper.id, mobilePane === 'papers')}>
-          {paper.isOrigin && <span className="origin-label"><span />Origin paper</span>}<strong>{paper.title}</strong><span className="sidebar-meta"><span>{paper.authors[0] || 'Unknown author'}{paper.authors.length > 1 ? ' et al.' : ''}</span><span>{paper.year ?? 'n.d.'}</span></span>{!paper.isOrigin && <span className="sidebar-score">{(paper.similarity * 100).toFixed(1)}% similarity</span>}
+          {paper.isOrigin && <span className="origin-label"><span />Origin paper</span>}<strong>{paper.title}</strong><span className="sidebar-meta"><span>{paper.authors[0] || 'Unknown author'}{paper.authors.length > 1 ? ' et al.' : ''}</span><span>{paper.year ?? 'n.d.'}</span></span>{!paper.isOrigin && <span className="sidebar-score">{paper.similarity > 0 ? `${(paper.similarity * 100).toFixed(1)}% similarity` : data.nodes.some(origin => origins.includes(origin.id) && (paper.references.includes(origin.id) || origin.references.includes(paper.id))) ? 'Direct citation' : 'No measured origin similarity'}</span>}
         </button>)}</div></aside>
         <section className="graph-main" aria-label={currentView === 'graph' ? 'Similarity graph' : 'Related papers'}>
           {currentView === 'graph' ? <><div className="graph-summary"><span><strong>{filtered.length}</strong> papers <span className="summary-divider">/</span> {edges.length} connections</span><button onClick={() => setDialog('data')}><DataBadge meta={data.meta} /><Info size={14} /></button></div><GraphCanvas nodes={filtered} edges={edges} selectedId={selected.id} onHover={setHoveredId} onSelect={id => select(id)} onOpen={open} /><button className="mobile-selection" onClick={() => setMobilePane('details')}><span><small>Selected paper</small><strong>{selected.title}</strong></span><ChevronRight size={20} /></button></> : <PaperTable papers={(currentView === 'prior' ? data.prior : currentView === 'derivative' ? data.derivative : data.nodes).filter(p => p.isOrigin || filter(p))} selected={selected.id} onSelect={id => select(id, true)} kind={currentView} />}
         </section>
-        <aside className="detail-sidebar" aria-label="Selected paper details"><PaperDetails paper={selected} origins={origins} onAdd={() => { if (origins.some(id => paperProvider(id) !== paperProvider(selected.id))) notify('Combined graph origins must use the same data source. Your origins are unchanged.'); else if (origins.length >= 3) notify('A graph can have up to 3 origin papers.'); else if (!origins.includes(selected.id)) navigate(graphUrl([...origins, selected.id])); }} /></aside>
+        <aside className="detail-sidebar" aria-label="Selected paper details"><PaperDetails paper={detailPaper} origins={origins} onAdd={() => { if (origins.some(id => paperProvider(id) !== paperProvider(detailPaper.id))) notify('Combined graph origins must use the same data source. Your origins are unchanged.'); else if (origins.length >= 3) notify('A graph can have up to 3 origin papers.'); else if (!origins.includes(detailPaper.id)) navigate(graphUrl([...origins, detailPaper.id])); }} /></aside>
       </div>
       <div className="workspace-status"><span><span className="status-dot" />{data.meta.candidateCount} papers compared</span><button onClick={() => setDialog('data')}>Data & coverage <Info size={13} /></button></div>
     </>}
+    {dialog === 'share' && data && <Dialog title="Share graph" onClose={() => setDialog(null)}><GraphShare key={shareUrl} url={shareUrl} title={data.nodes.filter(paper => paper.isOrigin).map(paper => paper.title).join(' + ')} expanded={params.has('job')} /></Dialog>}
     {dialog === 'expand' && expansion.config && <Dialog title="Expand research" onClose={() => setDialog(null)}><form onSubmit={async event => { event.preventDefault(); const target = Number(new FormData(event.currentTarget).get('candidateBudget')); if (await expansion.start(target)) setDialog(null); }}>
       <p className="dialog-copy">Start a durable acquisition job for these origin papers. Your quick graph remains usable until a completed result is ready. The display stays at up to 40 papers.</p>
       <label className="field-label jobs-target">Candidate target<select name="candidateBudget" defaultValue={Math.min(5000, expansion.config.candidateBudget)} disabled={expansion.creating}>{[...new Set([1000, 5000, 10000, 50000, expansion.config.candidateBudget])].sort((a, b) => a - b).filter(target => target <= expansion.config!.candidateBudget).map(target => <option key={target} value={target}>{exactNumber.format(target)} candidates</option>)}</select></label>

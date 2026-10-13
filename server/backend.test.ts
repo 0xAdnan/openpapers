@@ -18,6 +18,7 @@ import type { CandidatePool } from './collection.ts';
 
 const snapshotText = await readFile(fileURLToPath(new URL('../data/snapshot.json', import.meta.url)), 'utf8');
 const snapshot = JSON.parse(snapshotText) as { fetchedAt: string; examples: { id: string; field: string }[]; groups: CandidatePool[] };
+const featured = JSON.parse(await readFile(new URL('../data/featured.json', import.meta.url), 'utf8')) as { pools: CandidatePool[] };
 const bundled = [...new Map(snapshot.groups.flatMap(g => g.papers).map(p => [p.id, p])).values()];
 const meta: GraphResponse['meta'] = { source: 'snapshot', fetchedAt: snapshot.fetchedAt, candidateCount: 0, algorithm: ALGORITHM, coverage: 'Test fixture' };
 const fixture = (id: string, references: string[] = [], topics: string[] = []): Paper => ({
@@ -48,6 +49,13 @@ function verifyGraph(graph: GraphResponse, papers: Paper[]) {
     assert.ok(!seen.has(key));
     seen.add(key);
     const a = records.get(edge.source)!, b = records.get(edge.target)!;
+    if (edge.directCitation) {
+      // A citation link with no similarity evidence: drawn, but never scored as similarity.
+      assert.ok(graph.origins.includes(a.id) !== graph.origins.includes(b.id), 'direct links join an origin to a non-origin');
+      assert.ok(a.references.includes(b.id) || b.references.includes(a.id), 'direct links need a real citation');
+      assert.deepEqual([edge.weight, edge.sharedReferences, edge.coCitations], [0, 0, 0]);
+      continue;
+    }
     const ra = new Set(a.references), rb = new Set(b.references);
     const shared = [...ra].filter(id => rb.has(id)).length;
     const ca = papers.filter(p => p.references.includes(a.id));
@@ -142,12 +150,20 @@ test('weakly scored papers the origin cites or is cited by keep a place in the g
   const strangers = Array.from({ length: 45 }, (_, i) => fixture(`W9${i}`, ['WH', `WU${i}`]));
   const cited = fixture('WR', ['WH', ...Array.from({ length: 38 }, (_, i) => `WZ${i}`)]);
   const citing = fixture('WC', ['WO', 'WH', ...Array.from({ length: 20 }, (_, i) => `WV${i}`)]);
-  const papers = [fixture('WO', ['WR', 'WH']), cited, citing, ...strangers];
+  // Like SCOPE and STACD for Popper: direct neighbours with no similarity evidence at all.
+  const unscoredReference = fixture('WS', ['WQ']), unscoredCiter = fixture('WT', ['WO']);
+  const papers = [fixture('WO', ['WR', 'WH', 'WS']), cited, citing, unscoredReference, unscoredCiter, ...strangers];
   const graph = buildGraph(papers, ['WO'], meta);
   const ids = new Set(graph.nodes.map(p => p.id));
   assert.equal(graph.nodes.length, 40);
   assert.ok(ids.has('WR'), 'a paper the origin cites must not lose its place to stronger strangers');
   assert.ok(ids.has('WC'), 'a paper citing the origin must not lose its place to stronger strangers');
+  for (const id of ['WS', 'WT']) {
+    assert.ok(ids.has(id), `${id} is a direct neighbour without similarity evidence and must still be shown`);
+    const link = graph.edges.find(e => [e.source, e.target].sort().join() === ['WO', id].sort().join());
+    assert.equal(link?.directCitation, true, `${id} is joined to the origin by a direct-citation link`);
+    assert.equal(graph.nodes.find(n => n.id === id)!.similarity, 0);
+  }
   const weakest = Math.max(...['WR', 'WC'].map(id => graph.nodes.find(n => n.id === id)!.similarity));
   assert.ok(graph.nodes.filter(p => p.id.startsWith('W9')).every(p => p.similarity > weakest), 'fixture must rank both below the strangers');
   verifyGraph(graph, papers);
@@ -715,4 +731,142 @@ test('uncached S2 API outages/offline failures are actionable 503s without relab
     assert.equal(matches.meta.provider, 'openalex');
     assert.equal(calls, offline ? 0 : 3);
   }
+});
+
+test('homepage example graphs open from their bundled pools offline and online without fetching', async t => {
+  const previews = JSON.parse(await readFile(new URL('../src/featured-previews.json', import.meta.url), 'utf8')) as { id: string; title: string; nodes: unknown[] }[];
+  assert.equal(previews.length, 3);
+  for (const offline of [true, false]) {
+    let calls = 0;
+    const cache = new PersistentCache(await temporary(t));
+    const provider = new OpenAlexProvider({ cache, offline, fetch: async () => { calls++; throw new Error('Must not fetch'); } });
+    const service = new PaperService(cache, offline, provider);
+    for (const preview of previews) {
+      const pool = featured.pools.find(pool => pool.origin === preview.id)!;
+      assert.ok(pool.papers.length >= 100 && pool.papers.length <= 300);
+      const graph = await service.graph([preview.id]);
+      assert.equal(graph.meta.candidateCount, pool.papers.length);
+      assert.equal(graph.nodes.length, 40);
+      assert.equal(graph.nodes.find(p => p.isOrigin)!.title, preview.title);
+      assert.equal(graph.meta.source, 'snapshot', 'bundled example pools are shipped data');
+      assert.equal(preview.nodes.length, graph.nodes.length, 'the thumbnail shows the same graph');
+      verifyGraph(graph, pool.papers);
+    }
+    assert.equal(calls, 0);
+  }
+});
+
+test('expired pools hydrated at startup cannot shadow bundled homepage pools', async t => {
+  for (const offline of [true, false]) {
+    const directory = await temporary(t);
+    const cache = new PersistentCache(directory);
+    for (const pool of featured.pools) {
+      await cache.set(`pool:${pool.origin}`, { ...pool, fetchedAt: cachedDate,
+        papers: pool.papers.filter(paper => paper.id === pool.origin) }, -1);
+    }
+    const restartedCache = new PersistentCache(directory);
+    let calls = 0;
+    const provider = new OpenAlexProvider({ cache: restartedCache, offline, fetch: async () => { calls++; throw new Error('Must not fetch'); } });
+    const service = new PaperService(restartedCache, offline, provider);
+    for (const pool of featured.pools) {
+      const graph = await service.graph([pool.origin]);
+      assert.equal(graph.meta.source, 'snapshot');
+      assert.equal(graph.meta.fetchedAt, pool.fetchedAt);
+      assert.equal(graph.meta.candidateCount, pool.papers.length);
+      verifyGraph(graph, pool.papers);
+    }
+    assert.equal(calls, 0);
+  }
+});
+
+test('fresh exact cached homepage pools take precedence only until their inputs expire', async t => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  const cache = new PersistentCache(await temporary(t));
+  const pool = featured.pools[0];
+  await cache.set(`pool:${pool.origin}`, { ...pool, fetchedAt: cachedDate,
+    papers: pool.papers.filter(paper => paper.id === pool.origin) }, 60000);
+  let calls = 0;
+  const provider = new OpenAlexProvider({ cache, fetch: async () => { calls++; throw new Error('Must not fetch'); } });
+  const service = new PaperService(cache, false, provider);
+  const cached = await service.graph([pool.origin]);
+  assert.equal(cached.meta.source, 'cache');
+  assert.equal(cached.meta.fetchedAt, cachedDate);
+  assert.equal(cached.meta.candidateCount, 1);
+  assert.ok((await cache.get(`graph:v1:${pool.origin}`))!.expiresAt <= (await cache.get(`pool:${pool.origin}`))!.expiresAt);
+  t.mock.timers.tick(60001);
+  const bundled = await service.graph([pool.origin]);
+  assert.equal(bundled.meta.source, 'snapshot');
+  assert.equal(bundled.meta.fetchedAt, pool.fetchedAt);
+  assert.equal(bundled.meta.candidateCount, pool.papers.length);
+  assert.equal(calls, 0);
+});
+
+test('bundled homepage pools survive more than 12 other origin graph acquisitions', async t => {
+  const cache = new PersistentCache(await temporary(t));
+  let calls = 0;
+  const provider = new OpenAlexProvider({ cache, fetch: async input => {
+    calls++;
+    const url = new URL(String(input));
+    return Response.json(url.pathname === '/works' ? { results: [], meta: { count: 0 } }
+      : { id: `https://openalex.org/${url.pathname.split('/').pop()}`, display_name: 'Eviction fixture' });
+  } });
+  const service = new PaperService(cache, false, provider);
+  for (let i = 0; i < 13; i++) {
+    const graph = await service.graph([`W9000${i + 1}`]);
+    assert.equal(graph.meta.source, 'live');
+  }
+  assert.equal(calls, 26);
+  for (const pool of featured.pools) {
+    const graph = await service.graph([pool.origin]);
+    assert.equal(graph.meta.source, 'snapshot');
+    assert.equal(graph.meta.fetchedAt, pool.fetchedAt);
+    assert.equal(graph.meta.candidateCount, pool.papers.length);
+    verifyGraph(graph, pool.papers);
+  }
+  assert.equal(calls, 26, 'Homepage examples must not fetch after mutable pool eviction');
+});
+
+test('derived featured graphs persist finite seven-day expiry and reload unchanged from cache', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const directory = await temporary(t);
+  const cache = new PersistentCache(directory);
+  let calls = 0;
+  const noFetch = async () => { calls++; throw new Error('Must not fetch'); };
+  const service = new PaperService(cache, false, new OpenAlexProvider({ cache, fetch: noFetch }));
+  const requests = [...featured.pools.map(pool => [pool.origin]), featured.pools.map(pool => pool.origin)];
+  const graphs: GraphResponse[] = [];
+  const started = Date.now();
+  for (const origins of requests) graphs.push(await service.graph(origins));
+  const rows = JSON.parse(await readFile(join(directory, 'openalex-cache-v1.json'), 'utf8')) as { key: string; storedAt: string; expiresAt: number; value: GraphResponse }[];
+  assert.equal(rows.length, requests.length, 'Bundled pools themselves must not be persisted');
+  for (const row of rows) {
+    assert.ok(Number.isFinite(row.expiresAt));
+    assert.equal(row.expiresAt, started + 7 * 24 * 60 * 60 * 1000);
+    assert.ok(row.expiresAt <= Date.parse(row.storedAt) + 7 * 24 * 60 * 60 * 1000);
+  }
+  for (const offline of [false, true]) {
+    const restartedCache = new PersistentCache(directory);
+    const restarted = new PaperService(restartedCache, offline, new OpenAlexProvider({ cache: restartedCache, offline, fetch: noFetch }));
+    for (const graph of graphs) {
+      const key = `graph:v1:${graph.origins.join(',')}`;
+      const before = await restartedCache.get<GraphResponse>(key);
+      assert.ok(before, 'The actual JSON cache entry must survive reload');
+      const cached = await restarted.graph(graph.origins);
+      assert.equal(cached.meta.source, 'cache');
+      assert.equal(cached.meta.fetchedAt, graph.meta.fetchedAt);
+      const graphHash = (value: GraphResponse) => createHash('sha256').update(JSON.stringify({ origins: value.origins,
+        nodes: value.nodes, edges: value.edges, prior: value.prior, derivative: value.derivative })).digest('hex');
+      assert.equal(graphHash(cached), graphHash(graph));
+      assert.deepEqual(await restartedCache.get(key), before, 'Serving a cached graph must not rebuild or renew its TTL');
+    }
+  }
+  t.mock.timers.tick(7 * 24 * 60 * 60 * 1000 + 1);
+  for (const pool of featured.pools) {
+    assert.equal(await cache.get(`graph:v1:${pool.origin}`), undefined);
+    const rebuilt = await service.graph([pool.origin]);
+    assert.equal(rebuilt.meta.source, 'snapshot', 'Only the derived cache expires, not the shipped pool');
+    assert.equal(rebuilt.meta.fetchedAt, pool.fetchedAt);
+    assert.equal(rebuilt.meta.candidateCount, pool.papers.length);
+  }
+  assert.equal(calls, 0);
 });

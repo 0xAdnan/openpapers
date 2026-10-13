@@ -1,4 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { z } from 'zod';
 import type { DataMeta, Example, GraphResponse, Paper, SearchResponse } from '../shared/types.ts';
@@ -20,6 +21,7 @@ const SearchResponseSchema = SharedSearchResponseSchema.refine(r => oaMeta(r.met
 const PaperResponseSchema = SharedPaperResponseSchema.refine(r => oaMeta(r.meta) && oaPapers([r.paper]));
 const GraphResponseSchema = SharedGraphResponseSchema.refine(r => oaMeta(r.meta) && r.origins.every(id => ID_PATTERN.test(id)) &&
   oaPapers([...r.nodes, ...r.prior, ...r.derivative]) && r.edges.every(e => ID_PATTERN.test(e.source) && ID_PATTERN.test(e.target)));
+const GRAPH_TTL = 7 * 24 * 60 * 60 * 1000;
 
 interface Snapshot {
   version: number;
@@ -49,6 +51,8 @@ export function localSearch(papers: Paper[], q: string, page: number, meta: Data
 export class PaperService {
   private snapshot!: Snapshot;
   private pools: CandidatePool[] = [];
+  // Shipped homepage pools are independent of the bounded mutable cache.
+  private featured = new Map<string, CandidatePool>();
   private poolExpiry = new Map<string, number>();
   private papers = new Map<string, Paper>();
   private paperMeta = new Map<string, DataMeta>();
@@ -91,6 +95,14 @@ export class PaperService {
       if (parsed.success && entry.key === `paper:${parsed.data.paper.id}`) this.remember([parsed.data.paper], { ...parsed.data.meta, source: 'cache' }, entry.expiresAt);
     }
     this.pools = this.pools.slice(-12);
+    // Homepage example graphs ship with their real candidate pools, so they open instantly and offline.
+    const featured = await readFile(join(dirname(path), 'featured.json'), 'utf8').then(text => JSON.parse(text) as { pools?: unknown }, () => undefined);
+    for (const value of Array.isArray(featured?.pools) ? featured.pools : []) {
+      const parsed = CandidatePoolSchema.safeParse(value);
+      if (!parsed.success) continue;
+      this.featured.set(parsed.data.origin, parsed.data);
+      this.remember(parsed.data.papers, { source: 'cache', fetchedAt: parsed.data.fetchedAt });
+    }
     this.poolExpiry = new Map(this.pools.map(pool => [pool.origin, this.poolExpiry.get(pool.origin)!]));
   }
 
@@ -217,20 +229,32 @@ export class PaperService {
     signal.throwIfAborted();
     const key = `graph:v1:${origins.join(',')}`;
     const cached = await this.cached(key, GraphResponseSchema, this.offline);
-    const freshPools = origins.every(id => this.pools.some(g => g.origin === id && (this.poolExpiry.get(id) ?? 0) > Date.now()));
+    const freshPools = origins.every(id => this.pools.some(g => g.origin === id && (this.poolExpiry.get(id) ?? 0) > Date.now()) || this.featured.has(id));
     if (cached && cached.value.meta.algorithm === ALGORITHM && (this.offline || freshPools) && cached.value.origins.join(',') === origins.join(',')) return { ...cached.value, origins, meta: this.integrityMeta({ ...cached.value.meta, source: 'cache',
       ...(this.offline ? { warning: [cached.value.meta.warning, 'Offline: cached graph may be stale.'].filter(Boolean).join(' ') } : {}) }, [...cached.value.nodes, ...cached.value.prior, ...cached.value.derivative]) };
     return this.cache.deduplicate(key, async sharedSignal => {
       const operationSignal = AbortSignal.any([sharedSignal, AbortSignal.timeout(60000)]);
       const groups: CandidatePool[] = [];
       const snapshotGroups = new Set(this.snapshot.groups);
+      let expiresAt = Date.now() + GRAPH_TTL;
       let live = false;
       let fallback = false;
       const fallbackWarnings: string[] = [];
       for (const id of origins) {
         operationSignal.throwIfAborted();
         const exact = this.pools.find(g => g.origin === id && (this.poolExpiry.get(id) ?? 0) > Date.now());
-        if (exact) { groups.push({ ...exact, source: 'cache' }); continue; }
+        if (exact) {
+          groups.push({ ...exact, source: 'cache' });
+          expiresAt = Math.min(expiresAt, this.poolExpiry.get(id)!);
+          continue;
+        }
+        const featured = this.featured.get(id);
+        if (featured) {
+          const group = { ...featured, source: 'cache' as const };
+          snapshotGroups.add(group);
+          groups.push(group);
+          continue;
+        }
         if (!this.offline) try {
           const origin = await this.provider.getPaper(id, operationSignal);
           const group = await collectCandidates(this.provider, origin, operationSignal);
@@ -239,10 +263,11 @@ export class PaperService {
           this.pools = this.pools.filter(g => g.origin !== id);
           this.pools.push(group);
           this.pools = this.pools.slice(-12);
-          this.poolExpiry.set(id, Date.now() + 7 * 24 * 60 * 60 * 1000);
+          this.poolExpiry.set(id, Date.now() + GRAPH_TTL);
           this.poolExpiry = new Map(this.pools.map(pool => [pool.origin, this.poolExpiry.get(pool.origin)!]));
+          expiresAt = Math.min(expiresAt, this.poolExpiry.get(id)!);
           this.remember(group.papers, { source: group.source, fetchedAt: group.fetchedAt }, this.poolExpiry.get(id));
-          await this.cache.set(`pool:${id}`, group, 7 * 24 * 60 * 60 * 1000);
+          await this.cache.set(`pool:${id}`, group, GRAPH_TTL);
           live ||= group.source === 'live';
           continue;
         } catch (error) {
@@ -254,7 +279,7 @@ export class PaperService {
         fallback = true;
         const reason = this.offline ? 'Offline mode' : 'The paper data service is unavailable';
         fallbackWarnings.push(`${reason}; using stale local data for ${id}.`);
-        const local = [...this.pools, ...this.snapshot.groups].filter(g => g.papers.some(p => p.id === id));
+        const local = [...this.pools, ...this.featured.values(), ...this.snapshot.groups].filter(g => g.papers.some(p => p.id === id));
         const exactLocal = local.find(g => g.origin === id);
         if (exactLocal) {
           groups.push(this.snapshot.groups.includes(exactLocal) ? exactLocal : { ...exactLocal, source: 'cache' });
@@ -283,7 +308,6 @@ export class PaperService {
         warning: [...fallbackWarnings, 'Sampled data, not an exhaustive literature map. Co-citation counts are sample-local; an absent edge does not establish unrelatedness.'].join(' '),
       }, bounded));
       operationSignal.throwIfAborted();
-      const expiresAt = Math.min(...origins.map(id => this.poolExpiry.get(id) ?? 0));
       // Offline/outage responses remain stale; rebuilding does not renew their inputs.
       await this.cache.set(key, response, fallback ? -1 : Math.max(0, expiresAt - Date.now()));
       return response;

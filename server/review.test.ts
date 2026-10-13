@@ -10,6 +10,7 @@ import { createApp } from './index.ts';
 import { buildGraph, ALGORITHM } from './graph.ts';
 import { OpenAlexProvider, SELECT, normalizeWork, type OpenAlexWork, type WorksPage } from './openalex.ts';
 import { PaperService } from './service.ts';
+import { SemanticService } from './semantic-service.ts';
 
 const snapshot = JSON.parse(await readFile(new URL('../data/snapshot.json', import.meta.url), 'utf8')) as { groups: CandidatePool[] };
 const oldTime = '2001-01-01T00:00:00.000Z';
@@ -23,7 +24,9 @@ async function setup(t: TestContext) {
 }
 
 async function listen(t: TestContext, service: PaperService, requestTimeoutMs = 30) {
-  const server = createApp({ service, rateLimit: 1000, requestTimeoutMs }).app.listen(0, '127.0.0.1');
+  const semanticService = new SemanticService(service.cache, true);
+  await Promise.all([service.ready, semanticService.ready]);
+  const server = createApp({ service, semanticService, defaultProvider: 'openalex', rateLimit: 1000, requestTimeoutMs }).app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
   const address = server.address();

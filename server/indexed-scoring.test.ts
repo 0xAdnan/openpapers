@@ -44,12 +44,13 @@ function bruteGraph(index: GraphIndex, origins: string[]): GraphResponse {
   const chosen = new Set(origins);
   const candidates = [...index.papers()].filter(p => !chosen.has(p.id))
     .sort((a, b) => best(b.id) - best(a.id) || b.citations - a.citations || a.id.localeCompare(b.id));
-  // Papers an origin cites or is cited by take reserved slots before the strongest strangers.
-  const directSlots = Math.min(8, Math.floor((40 - origins.length) / (2 * origins.length)));
+  // Papers an origin cites or is cited by come first, with or without similarity evidence.
+  const directSlots = Math.max(0, Math.floor((40 - origins.length) / origins.length) - 8);
+  const linked = (origin: string) => [...index.papers()].filter(p => !origins.includes(p.id)
+    && (index.paper(origin)!.references.includes(p.id) || p.references.includes(origin)));
   for (const origin of origins) {
-    const references = new Set(index.paper(origin)!.references);
-    for (const p of candidates.filter(p => index.evidence(p.id, origin).weight > 0 && (references.has(p.id) || p.references.includes(origin)))
-      .sort((a, b) => index.evidence(b.id, origin).weight - index.evidence(a.id, origin).weight || a.id.localeCompare(b.id)).slice(0, directSlots)) chosen.add(p.id);
+    for (const p of linked(origin).sort((a, b) => index.evidence(b.id, origin).weight - index.evidence(a.id, origin).weight
+      || b.citations - a.citations || a.id.localeCompare(b.id)).slice(0, directSlots)) chosen.add(p.id);
   }
   for (const origin of origins) {
     for (const p of candidates.filter(p => index.evidence(p.id, origin).weight > 0)
@@ -77,6 +78,11 @@ function bruteGraph(index: GraphIndex, origins: string[]): GraphResponse {
     if (value.weight > 0) evidenced.push({ source: ids[i], target: ids[j], ...value });
   }
   const edges = pruneEdges(ids, evidenced);
+  for (const origin of origins) for (const p of linked(origin)) {
+    if (chosen.has(p.id) && index.evidence(origin, p.id).weight === 0) {
+      edges.push({ source: origin, target: p.id, weight: 0, sharedReferences: 0, coCitations: 0, directCitation: true });
+    }
+  }
   const decorate = (p: Paper, graphConnections = edges.filter(e => e.source === p.id || e.target === p.id).length) => {
     let evidence: EdgeEvidence = { weight: 0, sharedReferences: 0, coCitations: 0 };
     for (const origin of origins) if (origin !== p.id) {
@@ -207,18 +213,20 @@ test('sparse indexed expansion follows selected neighbors only, stops at 40 and 
     ], i));
     papers.push(paper('W999', ['unrelated']), paper('W998', ['W0']));
     const index = new CountingIndex(papers), graph = buildGraph(index, ['W0'], meta);
-    assert.equal(graph.nodes.length, Math.min(size, 40));
+    // W998 cites the origin without similarity evidence: shown, unlike the unrelated W999.
+    assert.equal(graph.nodes.length, Math.min(size + 1, 40));
+    assert.ok(graph.nodes.some(p => p.id === 'W998') && !graph.nodes.some(p => p.id === 'W999'));
     assert.deepEqual(graph, bruteGraph(bruteIndex(papers), ['W0']));
     assert.equal(index.pairs, graph.nodes.length * (graph.nodes.length - 1) / 2);
     assert.equal(new Set(index.anchors).size, index.anchors.length, 'Anchors are accumulated at most once');
     assert.ok(index.anchors.every(id => graph.nodes.some(p => p.id === id)), 'Unselected candidates are never scored as anchors');
     assert.ok(index.anchors.length <= graph.nodes.length);
-    if (size < 35) assert.match(graph.meta.warning!, /no artificial edges/);
+    if (graph.nodes.length < 35) assert.match(graph.meta.warning!, /no artificial edges/);
     else assert.equal(graph.meta.warning, undefined);
   }
   const graph = buildGraph([paper('W1'), paper('W2', ['W1']), paper('W3', ['external'])], ['W1', 'W3'], meta);
-  assert.deepEqual(graph.nodes.map(p => p.id), ['W1', 'W3']);
-  assert.deepEqual(graph.edges, []);
+  assert.deepEqual(graph.nodes.map(p => p.id), ['W1', 'W3', 'W2']);
+  assert.deepEqual(graph.edges, [{ source: 'W1', target: 'W2', weight: 0, sharedReferences: 0, coCitations: 0, directCitation: true }]);
   const branching = [paper('W1'), paper('W2'), paper('W3'), paper('W4', [], 5), paper('W5', [], 10),
     paper('W10', ['W1', 'W2']), paper('W11', ['W2', 'W3']), paper('W12', ['W3', 'W4']),
     paper('W13', ['W3', 'W5']), paper('W14', ['W1'])];
@@ -234,8 +242,9 @@ test('co-citation denominators include all candidate citers, even those not disp
   const papers = [paper('W1'), paper('W2'), paper('W3', ['W1', 'W2']),
     ...Array.from({ length: 1000 }, (_, i) => paper(`W${i + 4}`, ['W1']))];
   const graph = buildGraph(papers, ['W1'], meta);
-  assert.deepEqual(graph.nodes.map(p => p.id), ['W1', 'W2']);
-  assert.equal(graph.edges[0].weight, 1 / (2 * Math.sqrt(1001)));
+  assert.ok(graph.nodes.some(p => p.id === 'W2'));
+  const pair = graph.edges.find(e => [e.source, e.target].sort().join() === 'W1,W2')!;
+  assert.equal(pair.weight, 1 / (2 * Math.sqrt(1001)));
   assert.equal(graph.meta.candidateCount, 1003);
   assert.equal(graph.derivative[0].id, 'W3');
   assert.equal(graph.derivative[0].graphConnections, 2);
@@ -245,8 +254,8 @@ test('prior/derivative rankings count unique nonself references, retain evidence
   const papers = [paper('W1', ['W1', 'W90', 'W90']), paper('W2', ['W90']), paper('W90'),
     ...Array.from({ length: 25 }, (_, i) => paper(`W${100 + i}`, ['W1', 'W2', 'W2'], i))];
   const graph = buildGraph(papers, ['W1'], meta);
-  assert.equal(graph.prior[0].id, 'W90');
-  assert.equal(graph.prior[0].graphConnections, 2);
+  // The 25 citers of W1 are now shown, so W2 (cited by each, once) outranks W90.
+  assert.deepEqual(graph.prior.map(p => [p.id, p.graphConnections]), [['W2', 25], ['W90', 2]]);
   assert.equal(graph.derivative.length, 20);
   assert.equal(graph.derivative[0].id, 'W124');
   assert.ok(graph.derivative.every(p => p.graphConnections === 2));

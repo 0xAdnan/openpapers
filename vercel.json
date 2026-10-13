@@ -7,7 +7,7 @@
   "functions": {
     "api/index.mjs": {
       "maxDuration": 90,
-      "includeFiles": "{.generated/server.mjs,data/{snapshot,integrity-audit}.json}",
+      "includeFiles": "{.generated/server.mjs,data/{snapshot,integrity-audit,featured}.json}",
       "excludeFiles": "{.cache/**,rea/**,test-results/**,server/*.test.ts}"
     }
   },

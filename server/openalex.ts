@@ -308,9 +308,15 @@ export class OpenAlexProvider {
   }
 
   async search(q: string, page: number, signal?: AbortSignal) {
-    const doi = q.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '');
+    const query = q.trim();
+    const doi = query.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '');
+    // arXiv links and IDs resolve through their registered DataCite DOI; versions are dropped.
+    const arxiv = /^(?:arxiv:\s*|(?:https?:\/\/)?(?:www\.)?arxiv\.org\/(?:abs|pdf)\/)(\d{4}\.\d{4,5})(?:v\d+)?(?:\.pdf)?\/?$/i.exec(query);
+    const pmid = /^(?:pmid:?\s*|(?:https?:\/\/)?pubmed\.ncbi\.nlm\.nih\.gov\/)(\d{1,9})\/?$/i.exec(query);
     const params: Record<string, string> = { per_page: '20', page: String(page), select: SELECT };
-    if (/^10\.\d{4,9}\/[^\s,|]+$/i.test(doi)) params.filter = `doi:https://doi.org/${doi}`;
+    if (arxiv) params.filter = `doi:https://doi.org/10.48550/arxiv.${arxiv[1]}`;
+    else if (pmid) params.filter = `ids.pmid:${pmid[1]}`;
+    else if (/^10\.\d{4,9}\/[^\s,|]+$/i.test(doi)) params.filter = `doi:https://doi.org/${doi}`;
     else params.search = q;
     return this.request<WorksPage>('/works', params, signal);
   }

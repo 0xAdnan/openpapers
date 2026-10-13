@@ -30,6 +30,8 @@ export interface GraphEdge {
   weight: number;
   sharedReferences: number;
   coCitations: number;
+  // An origin and a paper it cites or is cited by, with no similarity evidence; weight is 0.
+  directCitation?: true;
 }
 
 export interface DataMeta {

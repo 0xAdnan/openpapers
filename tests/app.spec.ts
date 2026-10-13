@@ -1,5 +1,6 @@
 import type { GraphPaper, GraphResponse, SearchResponse } from '../shared/types';
 import { paperMatchScore } from '../shared/fuzzy';
+import featuredPreviews from '../src/featured-previews.json' with { type: 'json' };
 import { test, expect, EXAMPLES, S2_SAVED_PAPERS, nodes, details, graphPapers, views, openGraph, selectPaper,
   noHorizontalOverflow, screenshot, download, focusStaysInDialog, restoredFocus } from './fixtures';
 
@@ -42,8 +43,10 @@ test('homepage offers three real example links, each opening a 40-node SVG graph
   await expect(page).toHaveURL(/\/#main$/);
   await noHorizontalOverflow(page, testInfo, 'home');
   await screenshot(page, testInfo, 'desktop-home');
-  for (const example of EXAMPLES) {
-    const link = page.getByRole('link').filter({ has: page.getByRole('heading', { name: example.title, exact: true }) });
+  await expect(page.locator('.try-list a')).toHaveCount(5);
+  for (const example of featuredPreviews) {
+    const link = page.getByRole('link').filter({ has: page.getByRole('heading', { name: `${example.title} (${example.author}, ${example.year})`, exact: true }) });
+    await expect(link.locator('svg.graph-preview circle')).toHaveCount(40);
     await expect(link).toHaveAttribute('href', `/graph/${example.id}/graph`);
     await link.click();
     await expect(page).toHaveURL(new RegExp(`/graph/${example.id}/graph$`));
@@ -79,6 +82,18 @@ test('paper selection synchronizes SVG, details, evidence, URL and reload', asyn
   await selectPaper(page, other);
   await expect(node).toHaveAttribute('aria-pressed', 'false');
   await screenshot(page, testInfo, 'desktop-selected-graph');
+});
+
+test('hovering a graph node previews that paper in the details panel without selecting it', async ({ page }) => {
+  const graph = await openGraph(page);
+  const origin = graph.nodes.find(paper => paper.isOrigin)!;
+  const paper = graph.nodes.find(paper => !paper.isOrigin)!;
+  await expect(details(page).getByRole('heading', { name: origin.title, exact: true })).toBeVisible();
+  await page.locator(`g[data-paper-id="${paper.id}"] .graph-node-disc`).hover();
+  await expect(details(page).getByRole('heading', { name: paper.title, exact: true })).toBeVisible();
+  await expect(page).toHaveURL(url => url.searchParams.get('selected') !== paper.id);
+  await page.mouse.move(2, 2);
+  await expect(details(page).getByRole('heading', { name: origin.title, exact: true })).toBeVisible();
 });
 
 test('prior, derivative and list views navigate, sort real rows and select details', async ({ page }, testInfo) => {
@@ -373,7 +388,7 @@ test('OpenAlex-only configuration hides source selectors and resets legacy searc
   await expect(page.getByRole('combobox', { includeHidden: true })).toHaveCount(0);
   await expect(page.locator('main .search-hint')).toContainText('Free to use. No account or subscription.');
   await expect(page.locator('.site-footer')).not.toContainText('Semantic Scholar');
-  await expect(page.locator('.section-top')).toContainText('Try an example graph');
+  await expect(page.locator('.section-top')).toContainText('Or start with one of our example graphs');
   await page.locator('main').getByRole('textbox', { name: 'Search academic papers' }).fill('learning');
   await page.getByRole('button', { name: 'Build a graph', exact: true }).click();
   await expect(page.locator('.paper-card')).toHaveCount(20);
@@ -426,7 +441,7 @@ test('OpenAlex-only configuration hides source selectors and resets legacy searc
   await expect(nodes(page)).toHaveCount(40);
   await expect(page.locator('select')).toHaveCount(0);
   await expect(page.locator('.data-badge')).toContainText(/^(Live data|Snapshot|Cached data)·/);
-  await expect(details(page).getByRole('link', { name: 'Source record', exact: true })).toHaveAttribute('href', `https://openalex.org/${EXAMPLES[0].id}`);
+  await expect(details(page).getByRole('link', { name: /^Source record for / })).toHaveAttribute('href', `https://openalex.org/${featuredPreviews[0].id}`);
   expect(diagnostics.searchRequests.length).toBeGreaterThan(0);
   expect(diagnostics.searchRequests.every(url => new URL(url, page.url()).searchParams.get('provider') === 'openalex')).toBe(true);
 });
@@ -484,7 +499,7 @@ test('mixed-source saved papers preserve selections and download source-aware ci
   await expect(page.locator('.library-row')).toHaveCount(3);
   const s2 = S2_SAVED_PAPERS[0];
   const row = page.locator('.library-row').filter({ has: page.getByRole('heading', { name: s2.title, exact: true }) });
-  await expect(row.getByRole('link', { name: 'Source record', exact: true })).toHaveAttribute('href', s2.url);
+  await expect(row.getByRole('link', { name: /^Source record for / })).toHaveAttribute('href', s2.url);
   await expect(row.getByRole('link', { name: 'OpenAlex', exact: true })).toHaveCount(0);
   await expect(row.getByRole('link', { name: 'Semantic Scholar', exact: true })).toHaveCount(0);
   const checkbox = (title: string) => page.getByRole('checkbox', { name: `Select ${title} for combined graph`, exact: true });

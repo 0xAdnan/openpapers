@@ -1,7 +1,7 @@
 import type { GraphEdge, GraphPaper, GraphResponse, Paper } from '../shared/types.ts';
 import { ReferenceIndex, type EdgeEvidence, type GraphIndex } from './indexed-scoring.ts';
 
-export const ALGORITHM = 'indexed-v2: weight = (sharedReferences / sqrt(referenceCountA * referenceCountB) + observedCoCiters / sqrt(observedCiterCountA * observedCiterCountB)) / 2; zero denominators contribute 0. Exact reference-posting accumulation for origins and selected-neighbor expansion, then at most 780 exact displayed pairs. Co-citation uses only fetched candidate records (sample-local). No topic or direct-citation fallback edges. Each origin reserves slots for papers it cites or is cited by that have positive evidence. Displayed edges: union of each paper\'s 4 strongest plus a maximum spanning forest.';
+export const ALGORITHM = 'indexed-v2: weight = (sharedReferences / sqrt(referenceCountA * referenceCountB) + observedCoCiters / sqrt(observedCiterCountA * observedCiterCountB)) / 2; zero denominators contribute 0. Exact reference-posting accumulation for origins and selected-neighbor expansion, then at most 780 exact displayed pairs. Co-citation uses only fetched candidate records (sample-local). No topic fallback edges. Papers each origin cites or is cited by are selected first; those without similarity evidence get a weight-0 direct-citation link. Displayed edges: union of each paper\'s 4 strongest plus a maximum spanning forest.';
 
 // Nearly every pair of papers in an overlapping neighborhood shares some evidence,
 // so drawing all of them yields a near-complete graph. Keep each paper's strongest
@@ -51,15 +51,22 @@ export function buildGraph(papers: Paper[] | GraphIndex, origins: string[], meta
     (originScores.get(b.id)?.weight ?? 0) - (originScores.get(a.id)?.weight ?? 0) || b.citations - a.citations || a.id.localeCompare(b.id);
   const candidates = [...originScores.keys()].filter(id => !chosen.has(id)).map(id => index.paper(id)!).sort(candidateRank);
   // Papers an origin cites or is cited by are the context readers expect, but sparse
-  // reference lists can score them just below stronger strangers. Reserve them slots
-  // when they have positive similarity evidence; no direct-citation edges are invented.
-  const directSlots = Math.min(8, Math.floor((40 - origins.length) / (2 * origins.length)));
-  for (const origin of origins) {
+  // reference lists can score them low or not at all. Show them first, strongest first,
+  // leaving room for each origin's 8-paper similarity foothold below.
+  const directSlots = Math.max(0, Math.floor((40 - origins.length) / origins.length) - 8);
+  const direct = new Map(origins.map(origin => {
     const references = new Set(index.paper(origin)!.references);
-    const direct = [...perOrigin.get(origin)!].filter(([id]) => !origins.includes(id)
-      && (references.has(id) || index.paper(id)!.references.includes(origin)))
-      .sort((a, b) => b[1].weight - a[1].weight || a[0].localeCompare(b[0])).slice(0, directSlots);
-    for (const [id] of direct) chosen.add(id);
+    const linked = new Set<string>();
+    for (const paper of index.papers()) {
+      if (!origins.includes(paper.id) && (references.has(paper.id) || paper.references.includes(origin))) linked.add(paper.id);
+    }
+    return [origin, linked] as const;
+  }));
+  for (const origin of origins) {
+    const scores = perOrigin.get(origin)!;
+    const ranked = [...direct.get(origin)!].map(id => index.paper(id)!).sort((a, b) =>
+      (scores.get(b.id)?.weight ?? 0) - (scores.get(a.id)?.weight ?? 0) || b.citations - a.citations || a.id.localeCompare(b.id));
+    for (const paper of ranked.slice(0, directSlots)) chosen.add(paper.id);
   }
   // Give each origin a small foothold, so multi-origin graphs do not lose a field.
   for (const origin of origins) {
@@ -103,6 +110,14 @@ export function buildGraph(papers: Paper[] | GraphIndex, origins: string[], meta
     }
   }
   const edges = pruneEdges(ids, evidenced);
+  // A direct citation with no similarity evidence is still drawn, as a weightless citation link.
+  for (const origin of origins) {
+    for (const id of direct.get(origin)!) {
+      if (chosen.has(id) && !perOrigin.get(origin)!.has(id)) {
+        edges.push({ source: origin, target: id, weight: 0, sharedReferences: 0, coCitations: 0, directCitation: true });
+      }
+    }
+  }
   const degrees = new Map(ids.map(id => [id, 0]));
   for (const edge of edges) {
     degrees.set(edge.source, degrees.get(edge.source)! + 1);

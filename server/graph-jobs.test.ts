@@ -373,7 +373,9 @@ test('50k unique records are reachable under 1500 requests with a small bounded 
   assert.ok(maxFrontier < 300, `Frontier peaked at ${maxFrontier}, not one task per fetched paper`);
   assert.equal(store.rows.get(job.id)!.checkpoint.expanded.length, 64);
   assert.equal(store.paperReads, 1);
-  assert.ok(result!.result!.edges.every(edge => edge.weight > 0 && edge.sharedReferences + edge.coCitations > 0));
+  assert.ok(result!.result!.edges.every(edge => edge.directCitation
+    ? edge.weight === 0 && edge.sharedReferences + edge.coCitations === 0
+    : edge.weight > 0 && edge.sharedReferences + edge.coCitations > 0));
   const secondHop = provider.calls.filter(call => call.params.filter?.startsWith('cites:') && !['cites:W1', `cites:${references.slice(0, 8).join('|')}`, `cites:${references.slice(8, 16).join('|')}`, `cites:${references.slice(16, 24).join('|')}`].includes(call.params.filter));
   const counts = new Map<string, number>();
   for (const call of secondHop) counts.set(call.params.filter, (counts.get(call.params.filter) ?? 0) + 1);

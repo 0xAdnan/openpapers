@@ -7,7 +7,7 @@
 <p align="center">
   Open-source literature discovery with visual graphs of related research.
   <br />
-  <a href="https://openpapers-psi.vercel.app">Live demo</a> ·
+  <a href="https://openpapers.si">Live demo</a> ·
   <a href="#run">Run locally</a> ·
   <a href="#configuration">Configuration</a>
 </p>
@@ -75,6 +75,28 @@ Set these as server environment variables. See [`.env.example`](.env.example).
 Never expose API keys through `VITE_*` variables.
 
 ## Development
+
+### Make Commands
+
+```sh
+make dev                 # frontend + backend, loading .env when present
+make check               # backend tests, production build, then browser tests
+make deploy              # frontend + API deployment; Vercel builds remotely
+make deploy-prebuilt     # local Vercel build and prebuilt upload
+make deploy-checked      # full verification before production deployment
+make worker              # durable graph acquisition worker
+make migrate             # apply database migrations explicitly
+make help                # all available targets
+```
+
+The frontend and API deploy together in one Vercel project. `make deploy-frontend`
+and `make deploy-backend` are aliases for that same deployment. Database migrations
+are separate and never run automatically during deployment. `make push` pushes
+existing commits; it does not create a commit or deploy automatically.
+
+Run `make link` once on a new checkout and authenticate with Vercel. Override the
+target with `VERCEL_SCOPE=... VERCEL_PROJECT=...`. The prebuilt workflow downloads
+environment configuration under the ignored `.vercel/` directory; never publish it.
 
 ```sh
 npm test               # backend tests

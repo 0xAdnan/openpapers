@@ -319,8 +319,9 @@ test('sample collection uses documented BasePaper fields then hydrates outgoing 
   assert.equal(graph.meta.provider, 'semantic-scholar');
   assert.equal(graph.meta.algorithm, ALGORITHM);
   assert.equal(graph.meta.candidateCount, 4);
-  assert.equal(graph.nodes.length, 2, 'Sparse graphs only keep evidence-connected nodes');
-  const edge = graph.edges[0];
+  assert.equal(graph.nodes.length, 4, 'The origin\'s direct reference and citer are shown even without similarity evidence');
+  assert.deepEqual(graph.edges.filter(e => e.directCitation).map(e => [e.source, e.target].sort()).sort(), [[id(1), id(10)], [id(1), id(3)]].map(p => p.sort()).sort());
+  const edge = graph.edges.find(e => !e.directCitation)!;
   assert.deepEqual([edge.source, edge.target].sort(), [id(1), id(2)]);
   assert.equal(edge.sharedReferences, 1);
   assert.equal(edge.coCitations, 1);

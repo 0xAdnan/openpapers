@@ -44,6 +44,10 @@
   opacity: 0.9;
 }
 
+.graph-edge--direct {
+  stroke-dasharray: 4 3;
+}
+
 .graph-edge--faded {
   opacity: 0.07;
 }

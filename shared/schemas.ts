@@ -38,7 +38,7 @@ const graphPaper = PaperSchema.extend({
 });
 export const GraphResponseSchema = z.object({
   origins: z.array(id).min(1).max(3), nodes: z.array(graphPaper).min(1).max(40),
-  edges: z.array(z.object({ source: id, target: id, weight: z.number().positive().max(1), sharedReferences: count, coCitations: count })).max(780),
+  edges: z.array(z.object({ source: id, target: id, weight: z.number().min(0).max(1), sharedReferences: count, coCitations: count, directCitation: z.literal(true).optional() })).max(780),
   prior: z.array(graphPaper).max(20), derivative: z.array(graphPaper).max(20),
   meta: meta.extend({ candidateCount: count.max(50000), algorithm: z.string(), coverage: z.string(),
     candidateBudget: count.max(50000).optional(), referenceCount: count.max(2000000).optional(),
@@ -49,5 +49,7 @@ export const GraphResponseSchema = z.object({
   return nodes.size === graph.nodes.length && new Set(graph.origins).size === graph.origins.length &&
     graph.origins.every(origin => graph.nodes.some(paper => paper.id === origin && paper.isOrigin)) &&
     graph.nodes.every(paper => paper.isOrigin === graph.origins.includes(paper.id)) &&
-    graph.edges.every(edge => nodes.has(edge.source) && nodes.has(edge.target) && edge.source !== edge.target && edge.sharedReferences + edge.coCitations > 0);
+    graph.edges.every(edge => nodes.has(edge.source) && nodes.has(edge.target) && edge.source !== edge.target && (edge.directCitation
+      ? edge.weight === 0 && edge.sharedReferences + edge.coCitations === 0
+      : edge.weight > 0 && edge.sharedReferences + edge.coCitations > 0));
 });
