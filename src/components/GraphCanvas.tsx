@@ -78,7 +78,7 @@ function fitCamera(layout: Layout, size: { width: number; height: number }): Cam
   };
 }
 
-export default function GraphCanvas({ nodes, edges, selectedId, onSelect, onOpen }: GraphCanvasProps) {
+export default function GraphCanvas({ nodes, edges, selectedId, onSelect, onOpen, onHover }: GraphCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<Simulation<LayoutNode, LayoutEdge> | null>(null);
@@ -101,6 +101,8 @@ export default function GraphCanvas({ nodes, edges, selectedId, onSelect, onOpen
 
   const papers = new Map(nodes.map((node) => [node.id, node]));
   const selected = papers.get(selectedId);
+  // The origin is selected by default; only fade the rest once the reader picks another paper.
+  const focusing = !!selected && !selected.isOrigin;
   const years = nodes.flatMap((node) => node.year === null ? [] : [node.year]);
   const firstYear = years.length ? Math.min(...years) : null;
   const lastYear = years.length ? Math.max(...years) : null;
@@ -144,15 +146,18 @@ export default function GraphCanvas({ nodes, edges, selectedId, onSelect, onOpen
     }
     const maxWeight = Math.max(0.001, ...nextEdges.map((edge) => edge.weight));
     // d3-force's default random source is seeded. Sorted inputs make reloads reproducible.
+    // Strong links pull hard and short; weak links are long and slack, so similar papers
+    // cluster and weakly related ones drift outward. Collision only prevents disc overlap:
+    // reserving label width spreads nodes evenly and hides the similarity structure.
     const simulation = forceSimulation<LayoutNode>(nextNodes)
       .force('link', forceLink<LayoutNode, LayoutEdge>(nextEdges)
         .id((node) => node.id)
-        .distance((edge) => edge.source.radius + edge.target.radius + 42 + 45 * (1 - edge.weight / maxWeight))
-        .strength((edge) => 0.08 + 0.22 * edge.weight / maxWeight))
-      .force('charge', forceManyBody<LayoutNode>().strength(-180))
+        .distance((edge) => edge.source.radius + edge.target.radius + 15 + 60 * (1 - edge.weight / maxWeight))
+        .strength((edge) => (edge.weight / maxWeight) ** 2))
+      .force('charge', forceManyBody<LayoutNode>().strength(-120))
       .force('center', forceCenter(0, 0))
       .force('collision', forceCollide<LayoutNode>()
-        .radius((node) => Math.max(node.radius + 18, node.label.length * 3.2 + 5))
+        .radius((node) => node.radius + 3)
         .iterations(4))
       .stop();
     simulation.tick(280);
@@ -403,7 +408,7 @@ export default function GraphCanvas({ nodes, edges, selectedId, onSelect, onOpen
               return (
                 <line
                   key={edge.key}
-                  className={`graph-edge${isPath ? ' graph-edge--path' : isNeighbor ? ' graph-edge--neighbor' : selected ? ' graph-edge--faded' : ''}`}
+                  className={`graph-edge${isPath ? ' graph-edge--path' : isNeighbor ? ' graph-edge--neighbor' : focusing ? ' graph-edge--faded' : ''}`}
                   x1={edge.source.x} y1={edge.source.y} x2={edge.target.x} y2={edge.target.y}
                   strokeWidth={isPath ? 2.5 : 0.5 + 1.5 * edge.weight / maxWeight}
                   vectorEffect="non-scaling-stroke"
@@ -420,17 +425,19 @@ export default function GraphCanvas({ nodes, edges, selectedId, onSelect, onOpen
             const yearRatio = paper.year === null || firstYear === null || lastYear === null ? null
               : (paper.year - firstYear) / Math.max(1, lastYear - firstYear);
             const yearColor = yearRatio === null ? '#b4c9ca'
-              : `rgb(${Math.round(178 - 140 * yearRatio)}, ${Math.round(204 - 77 * yearRatio)}, ${Math.round(204 - 73 * yearRatio)})`;
+              : `rgb(${Math.round(178 - 162 * yearRatio)}, ${Math.round(204 - 126 * yearRatio)}, ${Math.round(204 - 122 * yearRatio)})`;
             return (
               <g
                 key={node.id}
                 data-paper-id={node.id}
-                className={`graph-node${paper.isOrigin ? ' graph-node--origin' : ''}${isSelected ? ' graph-node--selected' : ''}${isPath ? ' graph-node--path' : ''}${selected && !isSelected && !isPath && !isNeighbor ? ' graph-node--faded' : ''}`}
+                className={`graph-node${paper.isOrigin ? ' graph-node--origin' : ''}${isSelected ? ' graph-node--selected' : ''}${isPath ? ' graph-node--path' : ''}${focusing && !isSelected && !isPath && !isNeighbor ? ' graph-node--faded' : ''}`}
                 transform={`translate(${node.x} ${node.y})`}
                 role="button"
                 tabIndex={0}
                 aria-pressed={isSelected}
                 aria-label={`${paper.title}. ${paper.authors.join(', ') || 'Unknown author'}. ${paper.year ?? 'Year unknown'}. ${numberFormat.format(paper.citations)} citations.${paper.isOrigin ? ' Origin paper.' : ''} Select paper; Shift+Enter opens its graph.`}
+                onPointerEnter={() => onHover?.(node.id)}
+                onPointerLeave={() => onHover?.(null)}
                 onClick={(event) => { if (event.detail === 0 || !suppressClickRef.current) onSelect(node.id); }}
                 onDoubleClick={() => { if (!suppressClickRef.current) onOpen(node.id); }}
                 onKeyDown={(event) => {
@@ -484,7 +491,8 @@ export default function GraphCanvas({ nodes, edges, selectedId, onSelect, onOpen
             <li>Larger circles mean more citations. Sizes are logarithmic and capped to keep the map readable.</li>
             <li>Darker teal means a newer publication; pale gray-teal means the year is unknown.</li>
             <li>Magenta rings mark origin papers. Thicker gray lines mean stronger similarity.</li>
-            <li>Selection highlights neighbors and the blue path to the nearest origin, minimizing the sum of inverse similarity weights (normalized, with a 0.001 floor). Other papers fade.</li>
+            <li>Only each paper's strongest connections are drawn, so a missing line does not mean two papers are unrelated.</li>
+            <li>Selection highlights neighbors and the blue path to the nearest origin, minimizing the sum of inverse similarity weights (normalized, with a 0.001 floor). When a paper other than the origin is selected, other papers fade.</li>
           </ul>
           <p>Drag a paper to move it. Drag empty space to pan, including on touch screens. Scroll or use + / - to zoom; Fit restores the whole map. In a zoomed-out overview, only origin, path, selected, hovered, and focused labels are shown. Zoom in to see all labels.</p>
           <p>Tab to a paper; Enter or Space selects it. Double-click, Shift+Enter, or Open graph uses the selected paper as a new origin. The papers list is the text alternative.</p>
@@ -511,7 +519,7 @@ export default function GraphCanvas({ nodes, edges, selectedId, onSelect, onOpen
         <div className="graph-legend" role="img" aria-label={firstYear === null ? 'Publication years unknown' : `Publication year: pale teal ${firstYear}, dark teal ${lastYear}. Circle size shows citations.`}>
           <span className="graph-legend-title">Publication year</span>
           <svg className="graph-year-scale" width="180" height="8" viewBox="0 0 180 8" preserveAspectRatio="none" aria-hidden="true">
-            <defs><linearGradient id={yearGradientId}><stop offset="0" stopColor="#b2cccc" /><stop offset="1" stopColor="var(--teal, #267f83)" /></linearGradient></defs>
+            <defs><linearGradient id={yearGradientId}><stop offset="0" stopColor="#b2cccc" /><stop offset="1" stopColor="#104e52" /></linearGradient></defs>
             <rect width="180" height="8" fill={`url(#${yearGradientId})`} />
           </svg>
           <div className="graph-legend-years"><span>{firstYear ?? 'Unknown'}</span><span>{lastYear ?? ''}</span></div>

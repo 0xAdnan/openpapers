@@ -4,8 +4,10 @@ import type { z } from 'zod';
 import type { DataMeta, Example, GraphResponse, Paper, SearchResponse } from '../shared/types.ts';
 import { PersistentCache } from './cache.ts';
 import { collectCandidates, type CandidatePool } from './collection.ts';
-import { buildGraph } from './graph.ts';
+import { ALGORITHM, buildGraph } from './graph.ts';
 import { SEEDS, auditedConflict, seedConflict } from './integrity.ts';
+import { normalizeText, paperMatchScore } from '../shared/fuzzy.ts';
+import { doiIdentifier } from '../shared/identifiers.ts';
 import { ID_PATTERN, normalizeWork, OpenAlexProvider, ProviderError, workId } from './openalex.ts';
 import { CandidatePoolSchema as SharedCandidatePoolSchema, GraphResponseSchema as SharedGraphResponseSchema,
   PaperResponseSchema as SharedPaperResponseSchema, SearchResponseSchema as SharedSearchResponseSchema } from '../shared/schemas.ts';
@@ -33,18 +35,12 @@ export class ApiError extends Error {
 }
 
 export function localSearch(papers: Paper[], q: string, page: number, meta: DataMeta): SearchResponse {
-  const normalize = (value: string) => value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
-  const query = normalize(q);
-  const tokens = query.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  const doi = query.replace(/^https?:\/\/(?:dx\.)?doi\.org\//, '');
+  const query = normalizeText(q);
+  const doi = doiIdentifier(query);
   const id = workId(q);
   const ranked = [...new Map(papers.map(p => [p.id, p])).values()].map(p => {
-    const title = normalize(p.title);
-    const text = normalize([p.title, ...p.authors, ...p.topics, p.abstract, p.doi ?? '', p.id].join(' '));
-    let score = tokens.length && tokens.every(token => text.includes(token)) ? 1 : 0;
-    if (title.includes(query)) score += 10;
-    if (title === query) score += 100;
-    if (id === p.id || p.doi?.toLowerCase().replace(/^https?:\/\/doi\.org\//, '') === doi) score += 200;
+    let score = paperMatchScore(query, p);
+    if (id === p.id || (p.doi && doiIdentifier(normalizeText(p.doi)) === doi)) score += 2000;
     return { p, score };
   }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || b.p.citations - a.p.citations || a.p.id.localeCompare(b.p.id));
   return { results: ranked.slice((page - 1) * 20, page * 20).map(row => row.p), total: ranked.length, page, perPage: 20, meta };
@@ -62,7 +58,7 @@ export class PaperService {
 
   constructor(readonly cache: PersistentCache, readonly offline = false, provider?: OpenAlexProvider,
     snapshotPath = fileURLToPath(new URL('../data/snapshot.json', import.meta.url))) {
-    this.provider = provider ?? new OpenAlexProvider({ cache, offline, apiKey: process.env.OPENALEX_API_KEY });
+    this.provider = provider ?? new OpenAlexProvider({ cache, offline, apiKey: process.env.PAPERS_API_KEY });
     this.ready = this.load(snapshotPath);
   }
 
@@ -159,7 +155,7 @@ export class PaperService {
     const key = `search:${page}:${q.toLowerCase()}`;
     const cached = await this.cached(key, SearchResponseSchema, this.offline);
     if (cached) return { ...cached.value, meta: this.integrityMeta({ ...cached.value.meta, source: 'cache',
-      ...(this.offline ? { warning: [cached.value.meta.warning, 'Offline: cached OpenAlex search results may be stale.'].filter(Boolean).join(' ') } : {}) }, cached.value.results, q) };
+      ...(this.offline ? { warning: [cached.value.meta.warning, 'Offline: cached search results may be stale.'].filter(Boolean).join(' ') } : {}) }, cached.value.results, q) };
     if (!this.offline) {
       try {
         return await this.cache.deduplicate(key, async sharedSignal => {
@@ -178,13 +174,13 @@ export class PaperService {
       } catch {
         signal.throwIfAborted();
         const stale = await this.cached(key, SearchResponseSchema, true);
-        if (stale) return { ...stale.value, meta: this.integrityMeta({ ...stale.value.meta, source: 'cache', warning: [stale.value.meta.warning, 'OpenAlex unavailable; returning stale cached matches.'].filter(Boolean).join(' ') }, stale.value.results, q) };
+        if (stale) return { ...stale.value, meta: this.integrityMeta({ ...stale.value.meta, source: 'cache', warning: [stale.value.meta.warning, 'The paper data service is unavailable; returning stale cached matches.'].filter(Boolean).join(' ') }, stale.value.results, q) };
       }
     }
     const doiQuery = q.toLowerCase().replace(/^https?:\/\/(?:dx\.)?doi\.org\//, '');
     const response = localSearch([...this.papers.values()], this.snapshot.identifiers[doiQuery] ?? q, page, {
       source: this.pools.length ? 'cache' : 'snapshot', fetchedAt: this.snapshot.fetchedAt,
-      warning: `${this.offline ? 'Offline mode' : 'OpenAlex unavailable'}: searching bundled and previously cached metadata only. Result counts are local, not the full OpenAlex corpus.`,
+      warning: `${this.offline ? 'Offline mode' : 'The paper data service is unavailable'}: searching bundled and previously cached metadata only. Result counts are local, not the full corpus.`,
     });
     return { ...response, meta: this.integrityMeta(response.meta, response.results, q) };
   }
@@ -197,7 +193,7 @@ export class PaperService {
     const localMeta = this.paperMeta.get(id);
     const fresh = (this.paperExpiry.get(id) ?? 0) > Date.now();
     if (local && (fresh || this.offline)) return { paper: local, meta: this.integrityMeta({ ...localMeta!,
-      ...(this.offline ? { warning: [localMeta?.warning, 'Offline: local OpenAlex metadata may be stale.'].filter(Boolean).join(' ') } : {}) }, [local]) };
+      ...(this.offline ? { warning: [localMeta?.warning, 'Offline: local paper metadata may be stale.'].filter(Boolean).join(' ') } : {}) }, [local]) };
     if (this.offline) throw new ApiError(404, 'Paper is not available in the offline collection');
     try {
       const record = await this.provider.getPaper(id, signal);
@@ -208,10 +204,10 @@ export class PaperService {
       return { paper, meta };
     } catch (error) {
       signal.throwIfAborted();
-      if (error instanceof ProviderError && error.status === 404) throw new ApiError(404, 'OpenAlex paper not found');
+      if (error instanceof ProviderError && error.status === 404) throw new ApiError(404, 'Paper not found');
       if (local) return { paper: local, meta: this.integrityMeta({ ...localMeta!,
-        warning: [localMeta?.warning, 'OpenAlex unavailable; returning stale local metadata.'].filter(Boolean).join(' ') }, [local]) };
-      throw new ApiError(503, 'OpenAlex unavailable and this paper is not cached');
+        warning: [localMeta?.warning, 'The paper data service is unavailable; returning stale cached metadata.'].filter(Boolean).join(' ') }, [local]) };
+      throw new ApiError(503, 'The paper data service is unavailable and this paper is not cached');
     }
   }
 
@@ -222,7 +218,7 @@ export class PaperService {
     const key = `graph:v1:${origins.join(',')}`;
     const cached = await this.cached(key, GraphResponseSchema, this.offline);
     const freshPools = origins.every(id => this.pools.some(g => g.origin === id && (this.poolExpiry.get(id) ?? 0) > Date.now()));
-    if (cached && (this.offline || freshPools) && cached.value.origins.join(',') === origins.join(',')) return { ...cached.value, origins, meta: this.integrityMeta({ ...cached.value.meta, source: 'cache',
+    if (cached && cached.value.meta.algorithm === ALGORITHM && (this.offline || freshPools) && cached.value.origins.join(',') === origins.join(',')) return { ...cached.value, origins, meta: this.integrityMeta({ ...cached.value.meta, source: 'cache',
       ...(this.offline ? { warning: [cached.value.meta.warning, 'Offline: cached graph may be stale.'].filter(Boolean).join(' ') } : {}) }, [...cached.value.nodes, ...cached.value.prior, ...cached.value.derivative]) };
     return this.cache.deduplicate(key, async sharedSignal => {
       const operationSignal = AbortSignal.any([sharedSignal, AbortSignal.timeout(60000)]);
@@ -251,12 +247,12 @@ export class PaperService {
           continue;
         } catch (error) {
           operationSignal.throwIfAborted();
-          if (error instanceof ProviderError && error.status === 404) throw new ApiError(404, `OpenAlex paper ${id} not found`);
+          if (error instanceof ProviderError && error.status === 404) throw new ApiError(404, `Paper ${id} not found`);
           const stale = await this.cached(key, GraphResponseSchema, true);
-          if (stale && stale.value.origins.join(',') === origins.join(',')) return { ...stale.value, meta: this.integrityMeta({ ...stale.value.meta, source: 'cache', warning: [stale.value.meta.warning, 'OpenAlex unavailable; returning a stale cached graph.'].filter(Boolean).join(' ') }, [...stale.value.nodes, ...stale.value.prior, ...stale.value.derivative]) };
+          if (stale && stale.value.origins.join(',') === origins.join(',')) return { ...stale.value, meta: this.integrityMeta({ ...stale.value.meta, source: 'cache', warning: [stale.value.meta.warning, 'The paper data service is unavailable; returning a cached graph.'].filter(Boolean).join(' ') }, [...stale.value.nodes, ...stale.value.prior, ...stale.value.derivative]) };
         }
         fallback = true;
-        const reason = this.offline ? 'Offline mode' : 'OpenAlex unavailable';
+        const reason = this.offline ? 'Offline mode' : 'The paper data service is unavailable';
         fallbackWarnings.push(`${reason}; using stale local data for ${id}.`);
         const local = [...this.pools, ...this.snapshot.groups].filter(g => g.papers.some(p => p.id === id));
         const exactLocal = local.find(g => g.origin === id);
@@ -270,7 +266,7 @@ export class PaperService {
           }));
         } else {
           if (!this.papers.has(id)) throw new ApiError(this.offline ? 404 : 503, this.offline
-            ? `Paper ${id} is not available in the offline collection` : 'OpenAlex unavailable; this origin has no local graph data');
+            ? `Paper ${id} is not available in the offline collection` : 'The paper data service is unavailable; this origin has no local graph data');
           const papers = [this.papers.get(id)!, ...[...this.papers.values()].filter(p => p.id !== id)].slice(0, 900);
           groups.push({ origin: id, papers, fetchedAt: papers.map(p => this.paperMeta.get(p.id)!.fetchedAt).sort()[0], source: 'cache',
             coverage: `${reason}; graph uses locally cached metadata only; no expanded origin-specific neighborhood was fetched.` });
@@ -284,7 +280,7 @@ export class PaperService {
         source: live ? 'live' : uniqueGroups.every(g => snapshotGroups.has(g)) ? 'snapshot' : 'cache',
         fetchedAt: uniqueGroups.map(g => g.fetchedAt).sort()[0], candidateCount: bounded.length, algorithm: '',
         coverage: [...new Set(uniqueGroups.map(g => g.coverage))].join(' '),
-        warning: [...fallbackWarnings, 'Sampled OpenAlex data, not an exhaustive literature map. Co-citation counts are sample-local; an absent edge does not establish unrelatedness.'].join(' '),
+        warning: [...fallbackWarnings, 'Sampled data, not an exhaustive literature map. Co-citation counts are sample-local; an absent edge does not establish unrelatedness.'].join(' '),
       }, bounded));
       operationSignal.throwIfAborted();
       const expiresAt = Math.min(...origins.map(id => this.poolExpiry.get(id) ?? 0));

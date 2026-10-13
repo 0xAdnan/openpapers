@@ -31,7 +31,7 @@ interface Location {
 
 export interface WorksPage {
   results: OpenAlexWork[];
-  meta: { count: number };
+  meta: { count: number; next_cursor?: string | null };
 }
 
 export interface Acquisition {
@@ -47,7 +47,7 @@ export interface Acquisition {
 }
 
 export class ProviderError extends Error {
-  constructor(public status: number, message = 'OpenAlex is unavailable') {
+  constructor(public status: number, message = 'OpenAlex is unavailable', public retryAfter?: number) {
     super(message);
   }
 }
@@ -103,6 +103,7 @@ export class OpenAlexProvider {
   private day = new Date().toISOString().slice(0, 10);
   private nextStart = 0;
   private cooldownUntil = 0;
+  private cooldownStatus: 429 | 503 = 503;
   readonly acquisitions: Acquisition[] = [];
   private provenance = new WeakMap<object, DataMeta>();
 
@@ -167,10 +168,24 @@ export class OpenAlexProvider {
     const url = new URL(path, OPENALEX_ORIGIN);
     for (const [key, value] of Object.entries(params).sort(([a], [b]) => a.localeCompare(b))) url.searchParams.set(key, value);
     const key = `oa:${url.pathname}${url.search}`;
+    const valid = (data: unknown): data is T => {
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+      if (path !== '/works') return workId((data as OpenAlexWork).id) === path.slice('/works/'.length);
+      const page = data as WorksPage;
+      const cursor = page.meta?.next_cursor;
+      return Array.isArray(page.results) && page.results.length <= 100 &&
+        !!page.meta && typeof page.meta === 'object' && !Array.isArray(page.meta) &&
+        Number.isInteger(page.meta.count) && page.meta.count >= 0 &&
+        (!Object.hasOwn(page.meta, 'next_cursor') || cursor === null ||
+          typeof cursor === 'string' && cursor.length > 0 && cursor.length <= 2000) &&
+        page.results.every(work => !!workId(work?.id));
+    };
     const cached = await this.options.cache.get<T>(key, this.options.offline);
-    if (cached) {
+    if (cached && valid(cached.value)) {
       const original = await this.options.cache.get<Acquisition>(`provenance:${key}`, true);
-      this.record(cached.value, { ...(original?.value ?? {
+      const acquisition = original && typeof original.value?.fetchedAt === 'string' && Number.isFinite(Date.parse(original.value.fetchedAt))
+        ? original.value : undefined;
+      this.record(cached.value, { ...(acquisition ?? {
         path, params, fetchedAt: cached.storedAt,
         responseSha256: createHash('sha256').update(JSON.stringify(cached.value)).digest('hex'),
         hashKind: 'reserialized-json',
@@ -190,8 +205,12 @@ export class OpenAlexProvider {
         const today = new Date().toISOString().slice(0, 10);
         if (today !== this.day) { this.day = today; this.calls = 0; }
         // A conservative process-local circuit breaker, not a billing guarantee.
-        if (Date.now() < this.cooldownUntil || this.calls >= (this.options.maxRequests ?? (this.options.apiKey ? 250 : 50))) {
-          throw new ProviderError(503, 'OpenAlex budget or cooldown reached');
+        if (Date.now() < this.cooldownUntil) {
+          throw new ProviderError(this.cooldownStatus, 'OpenAlex cooldown reached', Math.ceil((this.cooldownUntil - Date.now()) / 1000));
+        }
+        if (this.calls >= (this.options.maxRequests ?? (this.options.apiKey ? 250 : 50))) {
+          const tomorrow = Date.parse(`${today}T00:00:00.000Z`) + 24 * 60 * 60 * 1000;
+          throw new ProviderError(503, 'OpenAlex request budget reached', Math.max(1, Math.ceil((tomorrow - Date.now()) / 1000)));
         }
         this.calls++;
         const response = await (this.options.fetch ?? fetch)(url, {
@@ -204,10 +223,23 @@ export class OpenAlexProvider {
           },
         });
         if (!response.ok) {
-          if (response.status === 429) this.cooldownUntil = Date.now() + 60 * 60 * 1000;
-          if (response.status >= 500) this.cooldownUntil = Date.now() + 30000;
-          await response.body?.cancel();
-          throw new ProviderError(response.status === 404 ? 404 : 503);
+          const now = Date.now();
+          let retryAfter: number | undefined;
+          if (response.status === 429) {
+            const header = response.headers.get('retry-after')?.trim();
+            const seconds = header && /^\d+(?:\.\d+)?$/.test(header) ? Number(header)
+              : header ? (Date.parse(header) - now) / 1000 : NaN;
+            retryAfter = Math.ceil(Math.min(24 * 60 * 60, Math.max(60, Number.isFinite(seconds) ? seconds : 3600)));
+            this.cooldownUntil = Math.max(this.cooldownUntil, now + retryAfter * 1000);
+            this.cooldownStatus = 429;
+          }
+          if (response.status >= 500 && this.cooldownUntil <= now + 30000) {
+            this.cooldownUntil = now + 30000;
+            this.cooldownStatus = 503;
+          }
+          await response.body?.cancel().catch(() => {});
+          throw new ProviderError([400, 401, 403, 404, 429].includes(response.status) ? response.status : 503,
+            response.status === 429 ? 'OpenAlex rate limited; wait before trying again' : 'OpenAlex is unavailable', retryAfter);
         }
         if (!response.body) throw new ProviderError(502);
         const reader = response.body.getReader();
@@ -222,12 +254,8 @@ export class OpenAlexProvider {
         }
         const text = Buffer.concat(chunks).toString('utf8');
         deadline.throwIfAborted();
-        const data = JSON.parse(text) as T;
-        if (!data || typeof data !== 'object' || (path === '/works'
-          ? !Array.isArray((data as WorksPage).results) || (data as WorksPage).results.length > 100 ||
-            !Number.isInteger((data as WorksPage).meta?.count) || (data as WorksPage).meta.count < 0 ||
-            (data as WorksPage).results.some(work => !workId(work?.id))
-          : workId((data as OpenAlexWork).id) !== path.slice('/works/'.length))) {
+        const data: unknown = JSON.parse(text);
+        if (!valid(data)) {
           throw new ProviderError(502, 'Invalid OpenAlex response');
         }
         const acquisition: Acquisition = {
@@ -245,7 +273,10 @@ export class OpenAlexProvider {
       } catch (error) {
         if (sharedSignal.aborted) throw sharedSignal.reason;
         if (error instanceof ProviderError) throw error;
-        this.cooldownUntil = Date.now() + 30000;
+        if (this.cooldownUntil <= Date.now() + 30000) {
+          this.cooldownUntil = Date.now() + 30000;
+          this.cooldownStatus = 503;
+        }
         throw new ProviderError(503);
       } finally {
         if (acquired) this.release();

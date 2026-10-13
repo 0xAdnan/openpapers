@@ -137,6 +137,19 @@ test('all three actual offline example graphs have 35-45 nodes and verified edge
   }
 });
 
+test('example graphs draw each paper\'s strongest edges, not every evidenced pair', () => {
+  for (const group of snapshot.groups) {
+    const graph = buildGraph(group.papers, [group.origin], meta);
+    const n = graph.nodes.length;
+    assert.ok(graph.edges.length < n * (n - 1) / 4, `${group.origin} has ${graph.edges.length} edges for ${n} nodes`);
+    const parent = new Map(graph.nodes.map(p => [p.id, p.id]));
+    const root = (id: string): string => parent.get(id) === id ? id : root(parent.get(id)!);
+    for (const edge of graph.edges) parent.set(root(edge.source), root(edge.target));
+    assert.equal(new Set(graph.nodes.map(p => root(p.id))).size, 1, 'pruning must not disconnect the graph');
+    for (const node of graph.nodes) assert.ok(node.graphConnections >= 1);
+  }
+});
+
 test('snapshot search matches title, CRISPR keyword, DOI and OpenAlex ID; pagination is real', () => {
   const searchMeta = { source: 'snapshot' as const, fetchedAt: snapshot.fetchedAt };
   assert.equal(localSearch(bundled, 'Attention Is All You Need', 1, searchMeta).results[0].id, snapshot.groups[0].origin);
@@ -186,7 +199,7 @@ test('live outage returns only local matches with a warning, not unrelated paper
   const result = await service.search('Attention Is All You Need', 1);
   assert.equal(result.results[0].id, snapshot.groups[0].origin);
   assert.equal(result.meta.source, 'snapshot');
-  assert.match(result.meta.warning!, /OpenAlex unavailable/);
+  assert.match(result.meta.warning!, /paper data service is unavailable/);
   assert.equal((await service.search('qzxvnonexistentliterature', 1)).results.length, 0);
   await assert.rejects(service.graph(['W999999999999999']), error => error instanceof ApiError && error.status === 503);
 });
@@ -376,13 +389,13 @@ test('Express live unknown ID is 404; upstream failures and internal errors do n
 });
 
 test('provider discovery validates DEFAULT_PROVIDER, redacts keys and keeps OpenAlex examples under either default', async t => {
-  const saved = { DEFAULT_PROVIDER: process.env.DEFAULT_PROVIDER, OPENALEX_API_KEY: process.env.OPENALEX_API_KEY, S2_API_KEY: process.env.S2_API_KEY };
+  const saved = { DEFAULT_PROVIDER: process.env.DEFAULT_PROVIDER, PAPERS_API_KEY: process.env.PAPERS_API_KEY, S2_API_KEY: process.env.S2_API_KEY };
   t.after(() => {
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
   });
-  process.env.OPENALEX_API_KEY = 'private-openalex-discovery-key';
+  process.env.PAPERS_API_KEY = 'private-openalex-discovery-key';
   process.env.S2_API_KEY = 'private-s2-discovery-key';
   const cache = new PersistentCache(await temporary(t));
   await cache.set('search:1:providerfixture', { results: [fixture('W900001')], total: 1, page: 1, perPage: 20,
@@ -405,7 +418,7 @@ test('provider discovery validates DEFAULT_PROVIDER, redacts keys and keeps Open
     const discovery = await fetch(`${origin}/api/providers`);
     assert.equal(discovery.status, 200);
     const discoveryText = await discovery.text();
-    assert.ok(!discoveryText.includes(process.env.OPENALEX_API_KEY!));
+    assert.ok(!discoveryText.includes(process.env.PAPERS_API_KEY!));
     assert.ok(!discoveryText.includes(process.env.S2_API_KEY!));
     assert.deepEqual(JSON.parse(discoveryText), { defaultProvider: selected, providers: [
       { id: 'openalex', name: 'OpenAlex', keyConfigured: true, offline: true },
@@ -438,7 +451,7 @@ test('provider discovery validates DEFAULT_PROVIDER, redacts keys and keeps Open
     assert.ok(oaGraph.nodes.every(paper => /^W\d+$/.test(paper.id)));
   }
   delete process.env.DEFAULT_PROVIDER;
-  delete process.env.OPENALEX_API_KEY;
+  delete process.env.PAPERS_API_KEY;
   delete process.env.S2_API_KEY;
   const { server, origin } = await listen(createApp({ service, semanticService }).app);
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
@@ -451,14 +464,14 @@ test('provider discovery validates DEFAULT_PROVIDER, redacts keys and keeps Open
 });
 
 test('without an S2 key, a Semantic Scholar default falls back to OpenAlex and blocks even cached S2 search without affecting saved papers/graphs', async t => {
-  const saved = { DEFAULT_PROVIDER: process.env.DEFAULT_PROVIDER, OPENALEX_API_KEY: process.env.OPENALEX_API_KEY, S2_API_KEY: process.env.S2_API_KEY };
+  const saved = { DEFAULT_PROVIDER: process.env.DEFAULT_PROVIDER, PAPERS_API_KEY: process.env.PAPERS_API_KEY, S2_API_KEY: process.env.S2_API_KEY };
   t.after(() => {
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
   });
   process.env.DEFAULT_PROVIDER = 'semantic-scholar';
-  delete process.env.OPENALEX_API_KEY;
+  delete process.env.PAPERS_API_KEY;
   delete process.env.S2_API_KEY;
   const cache = new PersistentCache(await temporary(t));
   await cache.set('search:1:providerfixture', { results: [fixture('W900001')], total: 1, page: 1, perPage: 20,
@@ -500,7 +513,7 @@ test('without an S2 key, a Semantic Scholar default falls back to OpenAlex and b
     for (const query of ['providerfixture', 'uncachedfixture']) {
       const response = await fetch(`${origin}/api/search?q=${query}&provider=semantic-scholar`);
       assert.equal(response.status, 503);
-      assert.deepEqual(await response.json(), { error: 'Semantic Scholar search is disabled until S2_API_KEY is configured. Use OpenAlex instead.' });
+      assert.deepEqual(await response.json(), { error: 'Semantic Scholar search is disabled until S2_API_KEY is configured.' });
     }
     for (const id of ['W900001', s2Id(1)]) {
       const provider = id.startsWith('S2:') ? 'semantic-scholar' : 'openalex';
@@ -674,7 +687,7 @@ test('uncached S2 API outages/offline failures are actionable 503s without relab
       const text = await response.text();
       assert.match(text, /no matching Semantic Scholar cache/);
       assert.match(text, /S2_API_KEY/);
-      assert.match(text, /No OpenAlex data is returned as Semantic Scholar/);
+      assert.match(text, /No other data is substituted for Semantic Scholar/);
       assert.ok(!text.includes(secret));
       assert.ok(!text.includes('private upstream response'));
       assert.deepEqual(Object.keys(JSON.parse(text)), ['error']);

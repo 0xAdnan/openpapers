@@ -57,6 +57,6 @@ export async function collectCandidates(provider: OpenAlexProvider, origin: Open
     origin: id, papers: [...records.values()].map(normalizeWork),
     fetchedAt: metadata.map(meta => meta.fetchedAt).sort()[0],
     source: metadata.some(meta => meta.source === 'live') ? 'live' : 'cache',
-    coverage: `${records.size} fetched candidates: origin references (first 90/${refs.length}), OpenAlex related works (first 25/${related.length}), top ${citing.results.length}/${citing.meta.count} citing works by citation count, ${sharedCount} works citing any of the first 8 origin references, and fetched common references. Related works only nominate candidates, never create edges. Citation-ranked sampling is not exhaustive; co-citation is measured within this sample and favors influential papers. Missing references/abstracts and OpenAlex indexing errors may reduce coverage.`,
+    coverage: `${records.size} fetched candidates: origin references (first 90/${refs.length}), related works (first 25/${related.length}), top ${citing.results.length}/${citing.meta.count} citing works by citation count, ${sharedCount} works citing any of the first 8 origin references, and fetched common references. Related works only nominate candidates, never create edges. Citation-ranked sampling is not exhaustive; co-citation is measured within this sample and favors influential papers. Missing references/abstracts and source indexing errors may reduce coverage.`,
   };
 }

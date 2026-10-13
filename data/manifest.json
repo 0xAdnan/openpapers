@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generatedAt": "2026-10-13T06:45:24.731Z",
-  "snapshotSha256": "0eec0ed66b06d64cb2d0ffb221829e60f392fcb8f0f84bca5c079f3ef7c6ee82",
+  "snapshotSha256": "0b593b0c44787a9eb998757cc6bdb35e1587f315f5effac4aa5b81d3a09347d6",
   "requestsMade": 5,
   "requestLimit": 29,
   "seedDois": [
@@ -240,5 +240,5 @@
       "creditsUsed": "1"
     }
   ],
-  "caveat": "OpenAlex is mutable: the same query can return different data later. Snapshot retains exact normalized fetched metadata and reference identifiers. hashKind identifies original-response versus reserialized-json hashes; snapshot hash covers the normalized bundle. Cached acquisitions retain their original cache time, not this refresh time."
+  "caveat": "The metadata source is mutable: the same query can return different data later. Snapshot retains exact normalized fetched metadata and reference identifiers. hashKind identifies original-response versus reserialized-json hashes; snapshot hash covers the normalized bundle. Cached acquisitions retain their original cache time, not this refresh time."
 }

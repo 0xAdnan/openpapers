@@ -49,6 +49,10 @@ export interface GraphResponse {
     candidateCount: number;
     algorithm: string;
     coverage: string;
+    candidateBudget?: number;
+    referenceCount?: number;
+    jobId?: string;
+    acquisitionStop?: string;
   };
 }
 
@@ -76,4 +80,6 @@ export interface GraphCanvasProps {
   selectedId: string;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
+  // Hover previews a paper without changing the selection; null when the pointer leaves.
+  onHover?: (id: string | null) => void;
 }

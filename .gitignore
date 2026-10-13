@@ -10,3 +10,7 @@ playwright-report/
 rea/
 .vercel/
 .generated/
+docs/COMPARISON.md
+.agents
+.claude
+agent

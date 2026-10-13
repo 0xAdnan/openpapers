@@ -6,12 +6,25 @@ import { PersistentCache } from './cache.ts';
 import { ApiError, PaperService } from './service.ts';
 import { SemanticService } from './semantic-service.ts';
 import { PAPER_ID_PATTERN, paperProvider, providerName, type ProviderId } from '../shared/providers.ts';
+import { GraphJobRunner } from './graph-jobs.ts';
+import { PostgresGraphStore } from './postgres-store.ts';
+import type { GraphJobStore } from './graph-store.ts';
+import { z } from 'zod';
+import { timingSafeEqual } from 'node:crypto';
+import { OpenAlexProvider } from './openalex.ts';
 
-export function createApp(options: { service?: PaperService; semanticService?: SemanticService; defaultProvider?: ProviderId; offline?: boolean; rateLimit?: number; distPath?: string; requestTimeoutMs?: number; cacheDirectory?: string; snapshotPath?: string; maxResponseBytes?: number } = {}) {
+export function createApp(options: { service?: PaperService; semanticService?: SemanticService; defaultProvider?: ProviderId; offline?: boolean; rateLimit?: number; distPath?: string; requestTimeoutMs?: number; cacheDirectory?: string; snapshotPath?: string; maxResponseBytes?: number; jobStore?: GraphJobStore; jobRunner?: GraphJobRunner; background?: (task: Promise<unknown>) => void } = {}) {
   const offline = options.offline ?? /^(1|true)$/i.test(process.env.OFFLINE ?? '');
   const cache = new PersistentCache(options.cacheDirectory ?? fileURLToPath(new URL('../.cache/', import.meta.url)));
   const service = options.service ?? new PaperService(cache, offline, undefined, options.snapshotPath);
   const semanticService = options.semanticService ?? new SemanticService(cache, offline);
+  const jobStore = options.jobStore ?? (process.env.DATABASE_URL && !offline ? new PostgresGraphStore() : undefined);
+  jobStore?.ready.catch(() => {});
+  const jobRunner = options.jobRunner ?? (jobStore ? new GraphJobRunner(jobStore,
+    new OpenAlexProvider({ cache, apiKey: process.env.PAPERS_API_KEY, maxRequests: 1500 })) : undefined);
+  const background = options.background ?? ((task: Promise<unknown>) => { void task.catch(() => {}); });
+  const candidateBudget = z.coerce.number().int().min(40).max(50000).parse(process.env.GRAPH_CANDIDATE_BUDGET ?? 5000);
+  const requestBudget = z.coerce.number().int().min(1).max(1500).parse(process.env.GRAPH_REQUEST_BUDGET ?? 100);
   const configuredProvider = options.defaultProvider ?? process.env.DEFAULT_PROVIDER ?? 'openalex';
   if (configuredProvider !== 'openalex' && configuredProvider !== 'semantic-scholar') throw new Error('DEFAULT_PROVIDER must be openalex or semantic-scholar');
   const semanticSearchEnabled = Boolean(process.env.S2_API_KEY);
@@ -84,11 +97,11 @@ export function createApp(options: { service?: PaperService; semanticService?: S
   const selector = (value: unknown, fallback: ProviderId): ProviderId => {
     if (value === undefined) return fallback;
     const selected = scalar(value, 'provider', 20);
-    if (selected !== 'openalex' && selected !== 'semantic-scholar') throw new ApiError(400, 'Provider must be openalex or semantic-scholar');
+    if (selected !== 'openalex' && selected !== 'semantic-scholar') throw new ApiError(400, 'Unknown search provider');
     return selected;
   };
   const providers = () => ({ defaultProvider, providers: [
-    { id: 'openalex', name: 'OpenAlex', keyConfigured: Boolean(process.env.OPENALEX_API_KEY), offline },
+    { id: 'openalex', name: 'OpenAlex', keyConfigured: Boolean(process.env.PAPERS_API_KEY), offline },
     ...(semanticSearchEnabled ? [{ id: 'semantic-scholar', name: 'Semantic Scholar', keyConfigured: true, offline }] : []),
   ] });
   app.get('/api/health', route(async (_req, res) => {
@@ -96,6 +109,41 @@ export function createApp(options: { service?: PaperService; semanticService?: S
     if (!res.writableEnded) res.json({ status: 'ok', provider: providerName(defaultProvider), offline });
   }));
   app.get('/api/providers', route(async (_req, res) => { if (!res.writableEnded) res.json(providers()); }));
+  app.get('/api/graph-jobs/config', route(async (_req, res) => {
+    let available = Boolean(jobStore && jobRunner);
+    if (available) try { await jobStore!.ready; } catch { available = false; }
+    if (!res.writableEnded) res.json({ available, candidateBudget, maxCandidateBudget: 50000, requestBudget,
+      persistence: available ? 'postgres' : 'none' });
+  }));
+  const submitSchema = z.object({ origins: z.array(z.string().regex(/^W[1-9]\d{0,14}$/)).min(1).max(3),
+    candidateBudget: z.number().int().min(40).max(50000).optional() }).strict();
+  app.post('/api/graph-jobs', express.json({ limit: '2kb' }), route(async (req, res) => {
+    const parsed = submitSchema.safeParse(req.body);
+    if (!parsed.success || new Set(parsed.data.origins).size !== parsed.data.origins.length) throw new ApiError(400, 'Use 1 to 3 distinct origin papers and a candidate budget from 40 to 50,000');
+    if (!jobStore || !jobRunner) throw new ApiError(503, 'Persistent graph jobs are not configured');
+    const budget = Math.min(parsed.data.candidateBudget ?? candidateBudget, candidateBudget);
+    const job = await jobStore.create(parsed.data.origins, budget, requestBudget);
+    if (!res.writableEnded) res.status(job.state === 'completed' ? 200 : 202).json(job);
+    if (job.state !== 'completed' && job.state !== 'failed') background(jobRunner.runStep(job.id).catch(() => {}));
+  }));
+  app.get('/api/graph-jobs/:id', route(async (req, res) => {
+    if (!z.string().uuid().safeParse(req.params.id).success) throw new ApiError(400, 'Invalid graph job ID');
+    if (!jobStore) throw new ApiError(503, 'Persistent graph jobs are not configured');
+    const job = await jobStore.get(scalar(req.params.id, 'graph job ID', 36));
+    if (!job) throw new ApiError(404, 'Graph job not found');
+    if (!res.writableEnded) res.json(job);
+  }));
+  app.post('/api/internal/graph-worker', route(async (req, res) => {
+    const secret = process.env.GRAPH_WORKER_TOKEN;
+    const actual = req.get('authorization') ?? '';
+    const expected = `Bearer ${secret ?? ''}`;
+    if (!secret || Buffer.byteLength(actual) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(actual), Buffer.from(expected))) {
+      throw new ApiError(401, 'Worker authentication required');
+    }
+    if (!jobRunner) throw new ApiError(503, 'Persistent graph jobs are not configured');
+    const jobs = await jobRunner.runBatch(10, Date.now() + 40000);
+    if (!res.writableEnded) res.json({ processedSteps: jobs.length });
+  }));
   app.get('/api/examples', route(async (_req, res) => {
     const examples = await service.examples();
     if (!res.writableEnded) res.json(examples.map(example => ({ ...example, provider: 'openalex' })));
@@ -105,7 +153,7 @@ export function createApp(options: { service?: PaperService; semanticService?: S
     const raw = req.query.page === undefined ? '1' : scalar(req.query.page, 'page', 3);
     if (!/^[1-9]\d{0,2}$/.test(raw) || Number(raw) > 100) throw new ApiError(400, 'Page must be an integer from 1 to 100');
     const selected = selector(req.query.provider, defaultProvider);
-    if (selected === 'semantic-scholar' && !semanticSearchEnabled) throw new ApiError(503, 'Semantic Scholar search is disabled until S2_API_KEY is configured. Use OpenAlex instead.');
+    if (selected === 'semantic-scholar' && !semanticSearchEnabled) throw new ApiError(503, 'Semantic Scholar search is disabled until S2_API_KEY is configured.');
     const response = await (selected === 'semantic-scholar' ? semanticService : service).search(q, Number(raw), signal);
     if (!res.writableEnded && !res.destroyed) res.json({ ...response, meta: { ...response.meta, provider: selected } });
   }));
@@ -113,7 +161,7 @@ export function createApp(options: { service?: PaperService; semanticService?: S
     const raw = scalar(req.query.ids, 'origin IDs', 131);
     const ids = raw.split(',');
     if (!ids.length || ids.length > 3 || ids.some(id => !PAPER_ID_PATTERN.test(id)) || new Set(ids).size !== ids.length) {
-      throw new ApiError(400, 'Use 1 to 3 distinct paper IDs: OpenAlex W IDs or Semantic Scholar S2:<40 hex> IDs');
+      throw new ApiError(400, 'Use 1 to 3 distinct paper IDs from search results');
     }
     const selected = paperProvider(ids[0]);
     if (ids.some(id => paperProvider(id) !== selected)) throw new ApiError(400, 'Combined graph origins must use the same provider; cross-provider identities have not been reconciled');

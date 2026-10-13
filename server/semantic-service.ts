@@ -3,7 +3,7 @@ import { S2_ID_PATTERN } from '../shared/providers.ts';
 import { CandidatePoolSchema, GraphResponseSchema, PaperResponseSchema, SearchResponseSchema } from '../shared/schemas.ts';
 import type { DataMeta, GraphResponse, Paper, SearchResponse } from '../shared/types.ts';
 import { PersistentCache } from './cache.ts';
-import { buildGraph } from './graph.ts';
+import { ALGORITHM, buildGraph } from './graph.ts';
 import { ApiError, localSearch } from './service.ts';
 import { normalizeSemanticPaper, S2_LICENSE_WARNING, S2_SEARCH_WARNING, semanticId, semanticLookup,
   SemanticScholarError, SemanticScholarProvider, type SemanticPaper } from './semantic-scholar.ts';
@@ -16,7 +16,7 @@ const PaperSchema = PaperResponseSchema.refine(r => s2Meta(r.meta) && s2Papers([
 const GraphSchema = GraphResponseSchema.refine(r => s2Meta(r.meta) && r.origins.every(id => S2_ID_PATTERN.test(id)) &&
   s2Papers([...r.nodes, ...r.prior, ...r.derivative]) && r.edges.every(e => S2_ID_PATTERN.test(e.source) && S2_ID_PATTERN.test(e.target)));
 type Pool = z.infer<typeof PoolSchema>;
-const unavailable = 'Semantic Scholar unavailable and no matching Semantic Scholar cache exists. Configure server-only S2_API_KEY for official API access, or select OpenAlex for the bundled examples. No OpenAlex data is returned as Semantic Scholar.';
+const unavailable = 'Semantic Scholar is unavailable and no matching Semantic Scholar cache exists. Configure server-only S2_API_KEY for official API access. No other data is substituted for Semantic Scholar results.';
 const joinWarnings = (...warnings: (string | undefined)[]) => [...new Set(warnings.filter((w): w is string => !!w))].join(' ');
 const deadline = (signal?: AbortSignal) => AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(60000)]);
 
@@ -219,7 +219,7 @@ export class SemanticService {
     const cached = await this.cached(key, GraphSchema, this.offline);
     signal.throwIfAborted();
     const freshPools = origins.every(id => (this.pools.get(id)?.expiresAt ?? 0) > Date.now());
-    if (cached && exactOrigins(cached.value) && (this.offline || freshPools)) return { ...cached.value,
+    if (cached && cached.value.meta.algorithm === ALGORITHM && exactOrigins(cached.value) && (this.offline || freshPools)) return { ...cached.value,
       meta: { ...cached.value.meta, ...this.metadata({ ...cached.value.meta, source: 'cache' }, this.offline ? 'Offline: cached Semantic Scholar graph may be stale.' : undefined) } };
     return this.cache.deduplicate(key, async sharedSignal => {
       const operation = deadline(sharedSignal), groups: { pool: Pool; expiresAt: number }[] = [], warnings: string[] = [];

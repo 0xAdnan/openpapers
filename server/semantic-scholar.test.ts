@@ -374,7 +374,7 @@ test('S2 cache hydration rejects OpenAlex/mixed/malformed entries and never fetc
   const service = new SemanticService(restarted, true, provider);
   await service.ready;
   for (const n of [1, 2, 3, 4, 6, 7, 8, 9]) {
-    await assert.rejects(service.paper(id(n)), e => e instanceof ApiError && e.status === 503 && /S2_API_KEY.*OpenAlex/.test(e.message));
+    await assert.rejects(service.paper(id(n)), e => e instanceof ApiError && e.status === 503 && /S2_API_KEY.*No other data/.test(e.message));
   }
   await assert.rejects(service.search('mixed', 1), /no matching Semantic Scholar cache/);
   await assert.rejects(service.graph([id(7)]), /no matching Semantic Scholar cache/);
@@ -540,7 +540,7 @@ test('unknown IDs return 404 online and uncached outages/offline return actionab
   assert.equal((await missing.search(sha(1), 1)).total, 0);
   await assert.rejects(missing.graph([id(1)]), e => e instanceof ApiError && e.status === 404);
   const offline = new SemanticService(cache, true);
-  await assert.rejects(offline.search('anything', 1), e => e instanceof ApiError && e.status === 503 && /S2_API_KEY.*OpenAlex/.test(e.message));
+  await assert.rejects(offline.search('anything', 1), e => e instanceof ApiError && e.status === 503 && /S2_API_KEY.*No other data/.test(e.message));
   await assert.rejects(offline.paper('W1'), e => e instanceof ApiError && e.status === 400);
   await assert.rejects(offline.graph([id(1), id(1)]), e => e instanceof ApiError && e.status === 400);
   await assert.rejects(offline.graph(['W1']), e => e instanceof ApiError && e.status === 400);

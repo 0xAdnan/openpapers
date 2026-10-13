@@ -1,7 +1,7 @@
 {
   "version": 1,
   "observedOn": "2026-10-13",
-  "snapshotSha256": "0eec0ed66b06d64cb2d0ffb221829e60f392fcb8f0f84bca5c079f3ef7c6ee82",
+  "snapshotSha256": "0b593b0c44787a9eb998757cc6bdb35e1587f315f5effac4aa5b81d3a09347d6",
   "method": "Independent HTTPS webfetch requests bypassing application mapping and caches. Projected observations, not retained raw HTTP bodies or original-response hashes. No PDFs, other provider APIs or refresh network calls.",
   "openAlexRequests": [
     {
@@ -52,7 +52,7 @@
       "liveLandingPage": "http://arxiv.org/abs/1907.11692",
       "authoritativeSource": "https://arxiv.org/abs/1907.11692",
       "authoritativeObservation": "RoBERTa: A Robustly Optimized BERT Pretraining Approach, Yinhan Liu and nine coauthors, submitted 26 July 2019; DOI 10.48550/arXiv.1907.11692. Live OpenAlex author list agrees with these authors, not its returned HISTORIAE title.",
-      "finding": "Returned title/DOI conflicts with returned landing-page identity. No replacement OpenAlex record verified; metadata not changed."
+      "finding": "Returned title/DOI conflicts with returned landing-page identity. No replacement record verified; metadata not changed."
     },
     {
       "id": "W2964121744",

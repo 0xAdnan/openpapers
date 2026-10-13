@@ -1,4 +1,5 @@
 import type { GraphPaper, GraphResponse, SearchResponse } from '../shared/types';
+import { paperMatchScore } from '../shared/fuzzy';
 import { test, expect, EXAMPLES, S2_SAVED_PAPERS, nodes, details, graphPapers, views, openGraph, selectPaper,
   noHorizontalOverflow, screenshot, download, focusStaysInDialog, restoredFocus } from './fixtures';
 
@@ -124,6 +125,9 @@ test('OA, year, keyword and PDF filters apply, compose, restore from URL and cle
   const candidate = graph.nodes.find(paper => !paper.isOrigin && paper.openAccess && paper.pdfUrl && paper.year)!;
   const keyword = candidate.title.split(/\s+/).find(word => /^[a-z]{4,}$/i.test(word))!;
   expect(keyword).toBeTruthy();
+  // Mirror the app's keyword filter: fuzzy score match or literal title/author substring.
+  const matchesKeyword = (paper: GraphPaper) => paperMatchScore(keyword, paper) > 0 ||
+    `${paper.title} ${paper.authors.slice(0, 3).join(', ')}`.toLowerCase().includes(keyword.toLowerCase());
   await selectPaper(page, candidate);
   const filterButton = page.getByRole('button', { name: 'Filter papers', exact: true });
   const assertFiltered = async (predicate: (paper: GraphPaper) => boolean) => {
@@ -146,8 +150,7 @@ test('OA, year, keyword and PDF filters apply, compose, restore from URL and cle
     if (kind === 'keyword') await dialog.getByLabel('Title or author').fill(keyword);
     await dialog.getByRole('button', { name: 'Apply filters' }).click();
     await expect(dialog).not.toBeVisible();
-    await assertFiltered(paper => kind === 'oa' ? paper.openAccess : kind === 'year' ? paper.year === candidate.year :
-      `${paper.title} ${paper.authors.slice(0, 3).join(', ')}`.toLowerCase().includes(keyword.toLowerCase()));
+    await assertFiltered(paper => kind === 'oa' ? paper.openAccess : kind === 'year' ? paper.year === candidate.year : matchesKeyword(paper));
     await filterButton.click();
     await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
     await expect(nodes(page)).toHaveCount(40);
@@ -161,8 +164,7 @@ test('OA, year, keyword and PDF filters apply, compose, restore from URL and cle
   await dialog.getByRole('checkbox', { name: 'Open access only' }).check();
   await dialog.getByRole('checkbox', { name: 'PDF available' }).check();
   await dialog.getByRole('button', { name: 'Apply filters' }).click();
-  const predicate = (paper: GraphPaper) => paper.openAccess && Boolean(paper.pdfUrl) && paper.year === candidate.year &&
-    `${paper.title} ${paper.authors.slice(0, 3).join(', ')}`.toLowerCase().includes(keyword.toLowerCase());
+  const predicate = (paper: GraphPaper) => paper.openAccess && Boolean(paper.pdfUrl) && paper.year === candidate.year && matchesKeyword(paper);
   await assertFiltered(predicate);
   const restoredUrl = page.url();
   expect(Object.fromEntries(new URL(restoredUrl).searchParams)).toEqual({
@@ -196,7 +198,7 @@ test('OA, year, keyword and PDF filters apply, compose, restore from URL and cle
 test('modal dialogs trap keyboard focus, cancel cleanly and validate reversed years', async ({ page }, testInfo) => {
   await openGraph(page);
   for (const [buttonName, title] of [
-    ['Filter papers', 'Filter graph papers'], ['Export graph', 'Export your research'], ['Coverage & methodology', 'Data & methodology'],
+    ['Filter papers', 'Filter graph papers'], ['Export graph', 'Export your research'], ['Data & coverage', 'Data & coverage'],
   ]) {
     const opener = page.getByRole('button', { name: buttonName, exact: true });
     await opener.focus();
@@ -283,7 +285,7 @@ test('graph exports download complete BibTeX, correctly quoted CSV and evidenced
     expect(bib).toContain(`@article{${paper.id},`);
     expect(bib).toContain(`url = {https://openalex.org/${paper.id}}`);
     const safe = (value: unknown) => { const text = String(value ?? ''); return /^[=+@\-\t\r]/.test(text) ? `'${text}` : text; };
-    expect(rows[index + 1]).toEqual([paper.title, paper.authors.join('; '), paper.year, paper.citations, paper.doi, paper.id, 'OpenAlex'].map(safe));
+    expect(rows[index + 1]).toEqual([paper.title, paper.authors.join('; '), paper.year, paper.citations, paper.doi, paper.id, `https://openalex.org/${paper.id}`].map(safe));
   }
   const json: GraphResponse = JSON.parse(await download(page, dialog.getByRole('button', { name: /Full graph JSON/ }), 'open-papers-graph.json', testInfo));
   expect(json).toEqual(graph);
@@ -369,9 +371,9 @@ test('OpenAlex-only configuration hides source selectors and resets legacy searc
   expect(config.providers.map((item: { id: string }) => item.id)).toEqual(['openalex']);
   await expect(page.locator('select')).toHaveCount(0);
   await expect(page.getByRole('combobox', { includeHidden: true })).toHaveCount(0);
-  await expect(page.locator('main .provider-hint')).toContainText('OpenAlex');
+  await expect(page.locator('main .search-hint')).toContainText('Free to use. No account or subscription.');
   await expect(page.locator('.site-footer')).not.toContainText('Semantic Scholar');
-  await expect(page.locator('.section-top')).toContainText('OpenAlex example graph');
+  await expect(page.locator('.section-top')).toContainText('Try an example graph');
   await page.locator('main').getByRole('textbox', { name: 'Search academic papers' }).fill('learning');
   await page.getByRole('button', { name: 'Build a graph', exact: true }).click();
   await expect(page.locator('.paper-card')).toHaveCount(20);
@@ -394,7 +396,7 @@ test('OpenAlex-only configuration hides source selectors and resets legacy searc
   }, { times: 1 });
   await page.goto('/search?q=learning&page=2&provider=semantic-scholar');
   await expect(page.getByRole('button', { name: 'Build a graph', exact: true })).toBeDisabled();
-  await expect(page.locator('main .provider-hint')).toContainText('Loading server data sources');
+  await expect(page.locator('main .loading-state')).toContainText('Searching the literature');
   await page.locator('.header-search').getByRole('textbox', { name: 'Search academic papers' }).fill('learning');
   // Allow the 400 ms autocomplete debounce to expire while configuration is withheld.
   await page.waitForTimeout(600);
@@ -410,8 +412,8 @@ test('OpenAlex-only configuration hides source selectors and resets legacy searc
   await expect(page.locator('.paper-card h2')).toHaveText(firstPage);
   await page.goBack();
   await expect(page).toHaveURL(/\/about$/);
-  await expect(page.locator('main')).toContainText('Semantic Scholar search is disabled until');
-  await expect(page.locator('main')).toContainText('OpenAlex, the active search source');
+  await expect(page.getByRole('heading', { name: 'Honest limitations', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Built to be inspected', exact: true })).toBeVisible();
   await expect(page.locator('.site-footer')).not.toContainText('Semantic Scholar');
 
   await page.goto('/search?q=learning&page=101&provider=semantic-scholar');
@@ -423,8 +425,8 @@ test('OpenAlex-only configuration hides source selectors and resets legacy searc
   await page.locator('.example-card').first().click();
   await expect(nodes(page)).toHaveCount(40);
   await expect(page.locator('select')).toHaveCount(0);
-  await expect(page.locator('.data-badge')).toContainText('OpenAlex');
-  await expect(details(page).getByRole('link', { name: 'OpenAlex', exact: true })).toHaveAttribute('href', `https://openalex.org/${EXAMPLES[0].id}`);
+  await expect(page.locator('.data-badge')).toContainText(/^(Live data|Snapshot|Cached data)·/);
+  await expect(details(page).getByRole('link', { name: 'Source record', exact: true })).toHaveAttribute('href', `https://openalex.org/${EXAMPLES[0].id}`);
   expect(diagnostics.searchRequests.length).toBeGreaterThan(0);
   expect(diagnostics.searchRequests.every(url => new URL(url, page.url()).searchParams.get('provider') === 'openalex')).toBe(true);
 });
@@ -436,7 +438,7 @@ test('legacy home URLs use OpenAlex autocomplete, submit and see all while unkno
   const input = page.locator('main').getByRole('textbox', { name: 'Search academic papers' });
   await input.fill(EXAMPLES[0].title);
   await expect(page.locator('#main-suggestions .suggestion').first()).toContainText(EXAMPLES[0].title);
-  await expect(page.locator('#main-suggestions .suggestion-status')).toContainText('Search powered by OpenAlex');
+  await expect(page.locator('#main-suggestions .suggestion-status')).toHaveCount(0);
   await input.press('ArrowDown');
   await expect(page.locator('#main-suggestions .suggestion.active')).toHaveCount(1);
   await input.press('Escape');
@@ -446,13 +448,15 @@ test('legacy home URLs use OpenAlex autocomplete, submit and see all while unkno
   await expect(page).toHaveURL(url => url.pathname === '/search' && url.searchParams.get('provider') === 'openalex');
   await expect(page.locator('.paper-card').first().getByRole('heading')).toHaveText(EXAMPLES[0].title);
   await input.focus();
-  await expect(page.locator('#main-suggestions .suggestion-status')).toContainText('Search powered by OpenAlex');
+  await expect(page.locator('#main-suggestions .suggestion').first()).toContainText(EXAMPLES[0].title);
+  await expect(page.locator('#main-suggestions .suggestion-status')).toHaveCount(0);
   await page.getByRole('button', { name: 'See all paper suggestions' }).click();
   await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'openalex' && url.searchParams.get('q') === EXAMPLES[0].title);
   await expect(page.locator('.paper-card').first().getByRole('heading')).toHaveText(EXAMPLES[0].title);
   const headerInput = page.locator('.header-search').getByRole('textbox', { name: 'Search academic papers' });
   await headerInput.fill('learning');
-  await expect(page.locator('#header-suggestions .suggestion-status')).toContainText('Search powered by OpenAlex');
+  await expect(page.locator('#header-suggestions .suggestion').first()).toBeVisible();
+  await expect(page.locator('#header-suggestions .suggestion-status')).toHaveCount(0);
   await headerInput.press('Escape');
   await headerInput.press('Enter');
   await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'openalex' && url.searchParams.get('q') === 'learning');
@@ -462,7 +466,7 @@ test('legacy home URLs use OpenAlex autocomplete, submit and see all while unkno
   const invalid = page.waitForResponse(response => response.url().endsWith(unknown));
   await page.goto('/search?q=learning&page=2&provider=unknown-source');
   expect((await invalid).status()).toBe(400);
-  await expect(page.getByRole('alert')).toContainText('Provider must be openalex or semantic-scholar');
+  await expect(page.getByRole('alert')).toContainText('Unknown search provider');
   await expect(page.locator('.paper-card')).toHaveCount(0);
   await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'unknown-source' && url.searchParams.get('page') === '2');
   await expect(page.locator('select')).toHaveCount(0);
@@ -480,8 +484,9 @@ test('mixed-source saved papers preserve selections and download source-aware ci
   await expect(page.locator('.library-row')).toHaveCount(3);
   const s2 = S2_SAVED_PAPERS[0];
   const row = page.locator('.library-row').filter({ has: page.getByRole('heading', { name: s2.title, exact: true }) });
-  await expect(row.getByRole('link', { name: 'Semantic Scholar', exact: true })).toHaveAttribute('href', s2.url);
+  await expect(row.getByRole('link', { name: 'Source record', exact: true })).toHaveAttribute('href', s2.url);
   await expect(row.getByRole('link', { name: 'OpenAlex', exact: true })).toHaveCount(0);
+  await expect(row.getByRole('link', { name: 'Semantic Scholar', exact: true })).toHaveCount(0);
   const checkbox = (title: string) => page.getByRole('checkbox', { name: `Select ${title} for combined graph`, exact: true });
   await checkbox(openalex.title).check();
   await checkbox(s2.title).click();
@@ -508,9 +513,9 @@ test('mixed-source saved papers preserve selections and download source-aware ci
   expect(csv.split('\r\n')[0]).toBe('"Title","Authors","Year","Citations","DOI","Paper ID","Source"');
   expect(csv.match(/Data source: Semantic Scholar; API\/data terms apply/g)).toHaveLength(2);
   expect(csv).toContain(`"${s2.id}"`);
-  await expect(page.locator('.site-footer')).toContainText('Code MIT / Data licenses');
-  await expect(page.locator('.site-footer').getByRole('link', { name: 'Semantic Scholar data & terms' })).toBeVisible();
-  await expect(page.locator('.site-footer')).not.toContainText('MIT / CC0');
+  await expect(page.locator('.site-footer')).toContainText('MIT licensed');
+  await expect(page.locator('.site-footer').getByRole('link', { name: 'GitHub', exact: true })).toHaveAttribute('href', 'https://github.com/0xAdnan/openpapers');
+  await expect(page.locator('.site-footer')).not.toContainText('Semantic Scholar');
   diagnostics.expectedFailureUrls.add(`/api/graph?ids=${encodeURIComponent(s2.id)}`);
   const unavailable = page.waitForResponse(response => response.url().endsWith(`/api/graph?ids=${encodeURIComponent(s2.id)}`));
   await row.getByRole('link', { name: 'Open graph', exact: true }).click();
@@ -533,7 +538,8 @@ test('mobile home, navigation and keyboard search have no source dropdown or S2 
   await page.getByRole('button', { name: 'Close navigation', exact: true }).click();
   const input = page.locator('main').getByRole('textbox', { name: 'Search academic papers' });
   await input.fill('learning');
-  await expect(page.locator('#main-suggestions .suggestion-status')).toContainText('Search powered by OpenAlex');
+  await expect(page.locator('#main-suggestions .suggestion').first()).toBeVisible();
+  await expect(page.locator('#main-suggestions .suggestion-status')).toHaveCount(0);
   await input.press('Escape');
   await input.press('Enter');
   await expect(page).toHaveURL(url => url.pathname === '/search' && url.searchParams.get('provider') === 'openalex');
@@ -624,7 +630,7 @@ test('invalid and unavailable origin IDs show accessible errors and allow recove
   await expect(page.locator('.example-card')).toHaveCount(3);
 });
 
-test('keyboard graph nodes select and re-origin; zoom, help and methodology are accessible', async ({ page }) => {
+test('keyboard graph nodes select and re-origin; zoom, help and data coverage are accessible', async ({ page }) => {
   const graph = await openGraph(page);
   const first = nodes(page).first();
   // Reach a node by real sequential keyboard navigation, not synthetic DOM clicks.
@@ -670,13 +676,13 @@ test('keyboard graph nodes select and re-origin; zoom, help and methodology are 
   await page.locator(`g[data-paper-id="${candidate.id}"]`).press('Shift+Enter');
   await expect(page).toHaveURL(new RegExp(`/graph/${candidate.id}/graph$`));
   await expect(details(page).getByRole('heading', { name: candidate.title, exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Coverage & methodology', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Data & methodology' });
-  await expect(dialog.getByRole('heading', { name: 'How similarity is calculated' })).toBeVisible();
+  await page.getByRole('button', { name: 'Data & coverage', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Data & coverage' });
+  await expect(dialog.getByRole('heading', { name: 'What this graph covers' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'How it works' }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'About' }).click();
   await expect(page).toHaveURL(/\/about$/);
-  await expect(page.getByRole('heading', { name: 'How does it work?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'What can I do with it?' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Your library stays local' })).toBeVisible();
   await expect(page.locator('main')).toContainText('not on our server');
 });
@@ -724,7 +730,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 834, height: 1112 
     }
     await views(page).getByRole('link', { name: 'Graph', exact: true }).click();
     await expect(nodes(page)).toHaveCount(40);
-    for (const [name, title] of [['Filter papers', 'Filter graph papers'], ['Export graph', 'Export your research'], ['Coverage & methodology', 'Data & methodology']]) {
+    for (const [name, title] of [['Filter papers', 'Filter graph papers'], ['Export graph', 'Export your research'], ['Data & coverage', 'Data & coverage']]) {
       const button = page.getByRole('button', { name, exact: true });
       await button.focus();
       await page.keyboard.press('Enter');
@@ -760,8 +766,8 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 834, height: 1112 
     await expect(page.getByRole('navigation', { name: 'Search result pages' })).toContainText('Page 2');
     await noHorizontalOverflow(page, testInfo, 'search-page-2');
     if (viewport.width <= 700) await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'How it works' }).click();
-    await expect(page.getByRole('heading', { name: 'How does it work?' })).toBeVisible();
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'About' }).click();
+    await expect(page.getByRole('heading', { name: 'What can I do with it?' })).toBeVisible();
     await noHorizontalOverflow(page, testInfo, 'about');
   });
 }

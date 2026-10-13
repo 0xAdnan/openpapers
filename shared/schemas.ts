@@ -40,7 +40,10 @@ export const GraphResponseSchema = z.object({
   origins: z.array(id).min(1).max(3), nodes: z.array(graphPaper).min(1).max(40),
   edges: z.array(z.object({ source: id, target: id, weight: z.number().positive().max(1), sharedReferences: count, coCitations: count })).max(780),
   prior: z.array(graphPaper).max(20), derivative: z.array(graphPaper).max(20),
-  meta: meta.extend({ candidateCount: count.max(900), algorithm: z.string(), coverage: z.string() }),
+  meta: meta.extend({ candidateCount: count.max(50000), algorithm: z.string(), coverage: z.string(),
+    candidateBudget: count.max(50000).optional(), referenceCount: count.max(2000000).optional(),
+    jobId: z.string().uuid().optional(), acquisitionStop: z.string().optional(),
+  }),
 }).refine(graph => {
   const nodes = new Set(graph.nodes.map(paper => paper.id));
   return nodes.size === graph.nodes.length && new Set(graph.origins).size === graph.origins.length &&

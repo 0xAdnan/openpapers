@@ -4,7 +4,7 @@ import audit from '../data/integrity-audit.json';
 export function auditedConflict(paper: Paper): string | undefined {
   const record = audit.records.find(record => record.id === paper.id);
   if (!record || paper.title !== record.liveTitle || paper.doi !== record.liveDoi || paper.year !== record.liveYear) return;
-  return `Data integrity warning: OpenAlex ${paper.id} has an independently observed publication-identity conflict. ${record.finding} Verify against ${record.authoritativeSource} before citing. Provider metadata has not been rewritten.`;
+  return `Data integrity warning: record ${paper.id} has an independently observed publication-identity conflict. ${record.finding} Verify against ${record.authoritativeSource} before citing. Source metadata has not been rewritten.`;
 }
 
 export const SEEDS = [
@@ -17,5 +17,5 @@ export function seedConflict(paper: Paper, seed: typeof SEEDS[number]): string |
   const expectedDoi = seed.doi.toLowerCase();
   const returnedDoi = paper.doi?.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').toLowerCase();
   if (returnedDoi === expectedDoi && paper.year === seed.year && seed.title.test(paper.title)) return;
-  return `Data integrity warning: seed DOI ${expectedDoi} (expected year ${seed.year}, title matching ${seed.title.source}) resolved to OpenAlex ${paper.id}, "${paper.title}", DOI ${returnedDoi ?? 'missing'}, year ${paper.year ?? 'missing'}. Returned provider metadata is retained; this is not a verified match to the seed publication. Citation relationships are provider-reported, not independently verified scholarly facts.`;
+  return `Data integrity warning: seed DOI ${expectedDoi} (expected year ${seed.year}, title matching ${seed.title.source}) resolved to record ${paper.id}, "${paper.title}", DOI ${returnedDoi ?? 'missing'}, year ${paper.year ?? 'missing'}. Returned source metadata is retained; this is not a verified match to the seed publication. Citation relationships are source-reported, not independently verified scholarly facts.`;
 }

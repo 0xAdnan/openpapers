@@ -10,7 +10,7 @@ import type { Example } from '../shared/types.ts';
 const directory = fileURLToPath(new URL('../data/', import.meta.url));
 const provider = new OpenAlexProvider({
   cache: new PersistentCache(fileURLToPath(new URL('../.cache/refresh/', import.meta.url))),
-  apiKey: process.env.OPENALEX_API_KEY,
+  apiKey: process.env.PAPERS_API_KEY,
   offline: process.env.OFFLINE === '1',
   maxRequests: 29,
   timeoutMs: 20000,
@@ -51,7 +51,7 @@ const manifest = {
   version: 1, generatedAt: new Date().toISOString(), snapshotSha256: createHash('sha256').update(body).digest('hex'),
   requestsMade: provider.acquisitions.filter(a => !a.fromCache).length, requestLimit: 29,
   seedDois: seeds.map(seed => seed.doi), acquisitions: provider.acquisitions,
-  caveat: 'OpenAlex is mutable: the same query can return different data later. Snapshot retains exact normalized fetched metadata and reference identifiers. hashKind identifies original-response versus reserialized-json hashes; snapshot hash covers the normalized bundle. Cached acquisitions retain their original cache time, not this refresh time.',
+  caveat: 'The metadata source is mutable: the same query can return different data later. Snapshot retains exact normalized fetched metadata and reference identifiers. hashKind identifies original-response versus reserialized-json hashes; snapshot hash covers the normalized bundle. Cached acquisitions retain their original cache time, not this refresh time.',
 };
 // Generated data only; publish after every seed has passed validation.
 await mkdir(directory, { recursive: true });
