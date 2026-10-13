@@ -111,7 +111,16 @@ export function createApp(options: { service?: PaperService; semanticService?: S
   app.get('/api/providers', route(async (_req, res) => { if (!res.writableEnded) res.json(providers()); }));
   app.get('/api/graph-jobs/config', route(async (_req, res) => {
     let available = Boolean(jobStore && jobRunner);
-    if (available) try { await jobStore!.ready; } catch { available = false; }
+    if (available) {
+      try {
+        await jobStore!.ready;
+      } catch (err) {
+        console.error('jobStore ready error on config check:', err instanceof Error ? err.stack ?? err.message : err);
+        available = false;
+      }
+    } else {
+      console.warn('jobStore not available. DATABASE_URL present:', Boolean(process.env.DATABASE_URL), 'offline:', offline);
+    }
     if (!res.writableEnded) res.json({ available, candidateBudget, maxCandidateBudget: 50000, requestBudget,
       persistence: available ? 'postgres' : 'none' });
   }));

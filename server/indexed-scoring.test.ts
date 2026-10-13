@@ -44,6 +44,13 @@ function bruteGraph(index: GraphIndex, origins: string[]): GraphResponse {
   const chosen = new Set(origins);
   const candidates = [...index.papers()].filter(p => !chosen.has(p.id))
     .sort((a, b) => best(b.id) - best(a.id) || b.citations - a.citations || a.id.localeCompare(b.id));
+  // Papers an origin cites or is cited by take reserved slots before the strongest strangers.
+  const directSlots = Math.min(8, Math.floor((40 - origins.length) / (2 * origins.length)));
+  for (const origin of origins) {
+    const references = new Set(index.paper(origin)!.references);
+    for (const p of candidates.filter(p => index.evidence(p.id, origin).weight > 0 && (references.has(p.id) || p.references.includes(origin)))
+      .sort((a, b) => index.evidence(b.id, origin).weight - index.evidence(a.id, origin).weight || a.id.localeCompare(b.id)).slice(0, directSlots)) chosen.add(p.id);
+  }
   for (const origin of origins) {
     for (const p of candidates.filter(p => index.evidence(p.id, origin).weight > 0)
       .sort((a, b) => index.evidence(b.id, origin).weight - index.evidence(a.id, origin).weight || a.id.localeCompare(b.id)).slice(0, 8)) chosen.add(p.id);

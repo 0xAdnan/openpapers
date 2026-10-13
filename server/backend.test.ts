@@ -137,6 +137,22 @@ test('all three actual offline example graphs have 35-45 nodes and verified edge
   }
 });
 
+test('weakly scored papers the origin cites or is cited by keep a place in the graph', () => {
+  // Mirrors Popper: its own 2024 predecessor shares one reference and ranked just below the cut.
+  const strangers = Array.from({ length: 45 }, (_, i) => fixture(`W9${i}`, ['WH', `WU${i}`]));
+  const cited = fixture('WR', ['WH', ...Array.from({ length: 38 }, (_, i) => `WZ${i}`)]);
+  const citing = fixture('WC', ['WO', 'WH', ...Array.from({ length: 20 }, (_, i) => `WV${i}`)]);
+  const papers = [fixture('WO', ['WR', 'WH']), cited, citing, ...strangers];
+  const graph = buildGraph(papers, ['WO'], meta);
+  const ids = new Set(graph.nodes.map(p => p.id));
+  assert.equal(graph.nodes.length, 40);
+  assert.ok(ids.has('WR'), 'a paper the origin cites must not lose its place to stronger strangers');
+  assert.ok(ids.has('WC'), 'a paper citing the origin must not lose its place to stronger strangers');
+  const weakest = Math.max(...['WR', 'WC'].map(id => graph.nodes.find(n => n.id === id)!.similarity));
+  assert.ok(graph.nodes.filter(p => p.id.startsWith('W9')).every(p => p.similarity > weakest), 'fixture must rank both below the strangers');
+  verifyGraph(graph, papers);
+});
+
 test('example graphs draw each paper\'s strongest edges, not every evidenced pair', () => {
   for (const group of snapshot.groups) {
     const graph = buildGraph(group.papers, [group.origin], meta);

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Filter, FlaskConical, GitBranch, Github, Info, Library, List, Menu, Network, Plus, Search, Share2, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, Filter, FlaskConical, GitBranch, Github, Globe, GraduationCap, Info, Library, List, Menu, Network, Plus, Search, Share2, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import type { DataMeta, Example, GraphPaper, GraphResponse, Paper, SearchResponse } from '../shared/types';
 import { ExamplesSchema, GraphResponseSchema, PaperSchema, ProvidersSchema, SearchResponseSchema } from '../shared/schemas';
 import { paperProvider, providerRecordUrl, type ProviderId } from '../shared/providers';
@@ -235,7 +235,7 @@ function SaveButton({ paper, small = false }: { paper: Paper; small?: boolean })
 
 function PaperLinks({ paper }: { paper: Paper }) {
   const pdf = safeUrl(paper.pdfUrl), doi = safeUrl(paper.doi?.startsWith('http') ? paper.doi : paper.doi ? `https://doi.org/${paper.doi}` : null);
-  return <div className="paper-links">{pdf && <a href={pdf} target="_blank" rel="noreferrer">PDF <ExternalLink size={13} /></a>}{doi && <a href={doi} target="_blank" rel="noreferrer">DOI <ExternalLink size={13} /></a>}<a href={providerRecordUrl(paper.id)} target="_blank" rel="noreferrer">Source record <ExternalLink size={13} /></a><a href={`https://scholar.google.com/scholar?q=${encodeURIComponent(paper.title)}`} target="_blank" rel="noreferrer">Scholar <ExternalLink size={13} /></a></div>;
+  return <div className="paper-links"><span className="open-in">Open in:</span>{pdf && <a className="open-icon" href={pdf} target="_blank" rel="noreferrer" aria-label={`PDF for ${paper.title}`} title="PDF"><FileText size={15} /></a>}{doi && <a className="open-icon" href={doi} target="_blank" rel="noreferrer" aria-label={`DOI ${doiIdentifier(paper.doi!)}`} title="DOI"><span className="doi-badge">doi</span></a>}<a className="open-icon" href={providerRecordUrl(paper.id)} target="_blank" rel="noreferrer" aria-label={`Source record for ${paper.title}`} title="Source record"><Globe size={15} /></a><a className="open-icon" href={`https://scholar.google.com/scholar?q=${encodeURIComponent(paper.title)}`} target="_blank" rel="noreferrer" aria-label={`Google Scholar for ${paper.title}`} title="Google Scholar"><GraduationCap size={16} /></a></div>;
 }
 
 function PaperCard({ paper, children }: { paper: Paper; children?: ReactNode }) {
