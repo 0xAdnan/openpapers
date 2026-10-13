@@ -14,7 +14,8 @@ export function createApp(options: { service?: PaperService; semanticService?: S
   const semanticService = options.semanticService ?? new SemanticService(cache, offline);
   const configuredProvider = options.defaultProvider ?? process.env.DEFAULT_PROVIDER ?? 'openalex';
   if (configuredProvider !== 'openalex' && configuredProvider !== 'semantic-scholar') throw new Error('DEFAULT_PROVIDER must be openalex or semantic-scholar');
-  const defaultProvider: ProviderId = configuredProvider;
+  const semanticSearchEnabled = Boolean(process.env.S2_API_KEY);
+  const defaultProvider: ProviderId = configuredProvider === 'semantic-scholar' && !semanticSearchEnabled ? 'openalex' : configuredProvider;
   const app = express();
   app.disable('x-powered-by');
   app.set('query parser', 'simple');
@@ -88,7 +89,7 @@ export function createApp(options: { service?: PaperService; semanticService?: S
   };
   const providers = () => ({ defaultProvider, providers: [
     { id: 'openalex', name: 'OpenAlex', keyConfigured: Boolean(process.env.OPENALEX_API_KEY), offline },
-    { id: 'semantic-scholar', name: 'Semantic Scholar', keyConfigured: Boolean(process.env.S2_API_KEY), offline },
+    ...(semanticSearchEnabled ? [{ id: 'semantic-scholar', name: 'Semantic Scholar', keyConfigured: true, offline }] : []),
   ] });
   app.get('/api/health', route(async (_req, res) => {
     await Promise.all([service.ready, semanticService.ready]);
@@ -104,6 +105,7 @@ export function createApp(options: { service?: PaperService; semanticService?: S
     const raw = req.query.page === undefined ? '1' : scalar(req.query.page, 'page', 3);
     if (!/^[1-9]\d{0,2}$/.test(raw) || Number(raw) > 100) throw new ApiError(400, 'Page must be an integer from 1 to 100');
     const selected = selector(req.query.provider, defaultProvider);
+    if (selected === 'semantic-scholar' && !semanticSearchEnabled) throw new ApiError(503, 'Semantic Scholar search is disabled until S2_API_KEY is configured. Use OpenAlex instead.');
     const response = await (selected === 'semantic-scholar' ? semanticService : service).search(q, Number(raw), signal);
     if (!res.writableEnded && !res.destroyed) res.json({ ...response, meta: { ...response.meta, provider: selected } });
   }));

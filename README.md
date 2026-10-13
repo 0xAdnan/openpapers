@@ -1,6 +1,6 @@
 # Open Papers
 
-An independent, MIT-licensed literature-discovery application inspired by the public Connected Papers workflow. React frontend, Express backend, selectable OpenAlex or Semantic Scholar data, and transparent reference-based similarity graphs. No Connected Papers private API, proprietary source, login, analytics, or paid graph limits.
+An independent, MIT-licensed literature-discovery application inspired by the public Connected Papers workflow. React frontend, Express backend, OpenAlex search, and transparent reference-based similarity graphs. The Semantic Scholar backend remains available for saved records; its search option requires a server API key. No Connected Papers private API, proprietary source, login, analytics, or paid graph limits.
 
 **Status: working research-tool foundation, not a verified ranking-equivalent replacement.** The comparison uncovered upstream identity/metadata conflicts. They are displayed prominently, preserved in an audit, and block publication of a replacement snapshot until resolved. Verify source publications before citing.
 
@@ -36,7 +36,7 @@ The three bundled examples and their local search/re-origining work offline. Loa
 
 ## Features
 
-- Choose OpenAlex or Semantic Scholar; search titles, keywords, DOI, and provider paper IDs with autocomplete and pagination. Semantic Scholar also resolves arXiv identifiers.
+- Search OpenAlex titles, keywords, DOI, and paper IDs with autocomplete and pagination. A source selector appears only when additional search sources are configured; keyed Semantic Scholar search also supports arXiv identifiers.
 - Reproducible examples for Transformers, CRISPR/Cas9, and gravitational waves.
 - Force-directed SVG graphs, publication-year colors, citation-scaled sizes, origin markers, weighted edges, selection paths, dragging, pan, and zoom.
 - Prior works, derivative works, sortable paper tables, abstract/details and external scholarly links.
@@ -53,8 +53,8 @@ Use environment variables in the shell or Node's supported environment-file mech
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OPENALEX_API_KEY` | unset | Optional server-only key for a larger OpenAlex budget |
-| `S2_API_KEY` | unset | Optional server-only Semantic Scholar key; strongly recommended for live API reliability |
-| `DEFAULT_PROVIDER` | `openalex` | Search default: `openalex` or `semantic-scholar` |
+| `S2_API_KEY` | unset | Server-only key required to enable Semantic Scholar search; absent means OpenAlex-only search |
+| `DEFAULT_PROVIDER` | `openalex` | Search default: `openalex` or `semantic-scholar`; falls back to `openalex` without `S2_API_KEY` |
 | `OFFLINE` | `0` | Set `1` to prohibit provider requests |
 | `PORT` | `3001` | Backend port |
 | `HOST` | `127.0.0.1` | Bind `0.0.0.0` when exposing through a container/reverse proxy |
@@ -62,17 +62,19 @@ Use environment variables in the shell or Node's supported environment-file mech
 
 Never put either key into a `VITE_*` variable or commit it. Search source is explicit in URLs and response attribution. Graphs infer their provider from canonical IDs: OpenAlex `W...` or Semantic Scholar `S2:<40 lowercase hex>`. Existing OpenAlex bookmarks and saved papers remain valid. Combined graphs must use one provider; publication identities are not silently merged across providers.
 
+With `S2_API_KEY` unset, `/api/providers` exposes only OpenAlex, and the homepage, header, and search page show no source dropdown. Search and autocomplete wait for that configuration before issuing requests. Legacy homepage/search URLs with `provider=semantic-scholar` are replaced with `provider=openalex`, retaining the query but resetting pagination to page 1. Replacement does not add a browser-history entry. Unknown providers still return HTTP 400 rather than silently falling back. Direct `/api/search?provider=semantic-scholar` requests return HTTP 503: `Semantic Scholar search is disabled until S2_API_KEY is configured. Use OpenAlex instead.`
+
 OpenAlex's free quota is IP-shared; remote failure can return matching cached/bundled OpenAlex data with warnings. Semantic Scholar failures can use only matching Semantic Scholar caches. With no S2 cache, the app returns an actionable error; it never relabels OpenAlex records as Semantic Scholar. Existing example cards remain explicitly OpenAlex.
 
 ## Semantic Scholar
 
-Choose **Semantic Scholar** in the homepage/search source selector. To start it as the default:
+Semantic Scholar search is currently disabled without a key. Request a key through the [official API page](https://www.semanticscholar.org/product/api), then provide `S2_API_KEY` through your server environment or secrets manager and restart the server. The API configuration then exposes Semantic Scholar alongside OpenAlex and the source selector returns. To use it as the default after configuring the key:
 
 ```sh
 DEFAULT_PROVIDER=semantic-scholar npm start
 ```
 
-Request a key through the [official API page](https://www.semanticscholar.org/product/api), then provide `S2_API_KEY` through your server environment or secrets manager. Most endpoints allow anonymous access but share a throttled pool; the introductory keyed limit is one request/second. This implementation serializes requests at that pace and respects `429`/`Retry-After` without bypasses or automatic retry bursts.
+Setting `DEFAULT_PROVIDER=semantic-scholar` alone does not enable search: without `S2_API_KEY`, the default remains OpenAlex. A configured key enables the search option, not a guarantee of successful live access. The introductory keyed limit is one request/second. This implementation serializes requests at that pace and respects `429`/`Retry-After` without bypasses or automatic retry bursts. Graph/paper routes still use their original IDs and backends, so saved Semantic Scholar records, source links, and export attribution remain intact even when its search is disabled.
 
 The official Academic Graph API provides search, papers, references, citations, and batch metadata. Our adapter samples up to 80 origin references and 100 citing records, batch-hydrates outgoing references, and fetches common references within the 300-candidate cap. API ordering is unspecified. This is still our independent graph scorer, not Connected Papers' exact ranking. Relevance search exposes the first 1,000 matches (pages 1-50); totals are upstream approximate counts.
 
@@ -112,7 +114,9 @@ npm run build
 npm run test:e2e
 ```
 
-E2E tests serve production offline on `127.0.0.1:43127`, use local Chrome, and download/parse actual exports. Normal workflows use real API responses; saved-data corruption and S2 export tests seed explicitly synthetic browser-storage fixtures. `test-results/e2e-report.json` and screenshots are generated by the suite. Tests respect the real 60 requests/minute/IP limit. Backend tests cover malformed inputs, timeouts, provider failures, source isolation, cache expiry, exact edge formulas and snapshot integrity warnings.
+E2E tests serve production offline on `127.0.0.1:43127` with `S2_API_KEY` unset, use local Chrome, and download/parse actual exports. Normal workflows use real API responses; regressions cover hidden single-source selectors, legacy URL replacement, OpenAlex-only search requests, and mobile keyboard search. Saved-data corruption and S2 export tests seed explicitly synthetic browser-storage fixtures. `test-results/e2e-report.json` and screenshots are generated by the suite. Tests respect the real 60 requests/minute/IP limit. Backend tests cover malformed inputs, timeouts, provider failures, source isolation, cache expiry, exact edge formulas and snapshot integrity warnings.
+
+Unset any inherited `S2_API_KEY` before the no-key browser suite, for example `env -u S2_API_KEY npm run test:e2e`. The configuration-loading regression delays a real `/api/providers` response to verify that neither results nor autocomplete search starts early. Live keyed Semantic Scholar search is not exercised by this suite.
 
 If local Chrome is absent, run `npx playwright install chromium` first; the tests then use Playwright's installed browser. GitHub Actions runs backend, build and browser checks without API keys.
 
@@ -148,7 +152,7 @@ Cloudflare DNS for `openpapers.si`: use the project-specific CNAME destination r
 
 ### Container
 
-Container build: `docker build -t open-papers .`, then `docker run --rm -p 3001:3001 -e OFFLINE=1 open-papers`. For live search, omit `OFFLINE=1` and supply server-only provider keys as needed. Set `DEFAULT_PROVIDER=semantic-scholar` to change the initial search source.
+Container build: `docker build -t open-papers .`, then `docker run --rm -p 3001:3001 -e OFFLINE=1 open-papers`. For live search, omit `OFFLINE=1` and supply server-only provider keys as needed. Semantic Scholar search requires `S2_API_KEY`; with that key configured, `DEFAULT_PROVIDER=semantic-scholar` changes the initial search source.
 
 Use HTTPS at your reverse proxy. Rate limits and budgets are process-local; multi-instance deployments require shared enforcement. Forwarded IP headers are deliberately untrusted by default. Cache writes are bounded and atomic; mount `.cache` for persistence if desired. No authentication or cloud library sync is implemented. Clicking scholarly links sends the normal browser request to that external site. Live search terms are sent to the explicitly selected provider.
 

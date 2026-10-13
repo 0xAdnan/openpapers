@@ -20,12 +20,13 @@ export const S2_SAVED_PAPERS: Paper[] = ['1', '2'].map(suffix => ({
   pdfUrl: null, openAccess: false, topics: [],
 }));
 
-type Diagnostics = { expectedFailureUrls: Set<string> };
+type Diagnostics = { expectedFailureUrls: Set<string>; searchRequests: string[] };
 
 export const test = base.extend<{ diagnostics: Diagnostics }>({
   viewport: { width: 1440, height: 900 },
   diagnostics: [async ({ page }, use, testInfo) => {
     const expectedFailureUrls = new Set<string>();
+    const searchRequests: string[] = [];
     const runtimeErrors: string[] = [];
     const consoleErrors: { text: string; url: string }[] = [];
     const httpErrors: { status: number; url: string }[] = [];
@@ -37,6 +38,10 @@ export const test = base.extend<{ diagnostics: Diagnostics }>({
       });
     });
     page.on('pageerror', error => runtimeErrors.push(error.stack ?? error.message));
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/search') searchRequests.push(url.pathname + url.search);
+    });
     page.on('console', message => {
       if (message.type() === 'error') consoleErrors.push({ text: message.text(), url: message.location().url });
     });
@@ -49,15 +54,17 @@ export const test = base.extend<{ diagnostics: Diagnostics }>({
         networkErrors.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText}`);
       }
     });
-    await use({ expectedFailureUrls });
+    await use({ expectedFailureUrls, searchRequests });
     const cspViolations = await page.evaluate(() => window.cspViolations ?? []);
     expect.soft(cspViolations, 'Production CSP violations').toEqual([]);
     const expected = (url: string) => expectedFailureUrls.has(new URL(url).pathname + new URL(url).search);
     const unexpectedConsole = consoleErrors.filter(error => !(error.url && expected(error.url) &&
       /^Failed to load resource: the server responded with a status of (400|404|503)\b/.test(error.text)));
     const unexpectedHttp = httpErrors.filter(error => !expected(error.url));
+    expect.soft(searchRequests.filter(url => new URL(url, page.url()).searchParams.get('provider') !== 'openalex' && !expectedFailureUrls.has(url)),
+      'All ordinary searches must use the configured OpenAlex source').toEqual([]);
     await testInfo.attach('browser-diagnostics', {
-      body: JSON.stringify({ runtimeErrors, consoleErrors, httpErrors, networkErrors }, null, 2),
+      body: JSON.stringify({ runtimeErrors, consoleErrors, httpErrors, networkErrors, searchRequests }, null, 2),
       contentType: 'application/json',
     });
     expect.soft(runtimeErrors, 'Uncaught browser runtime errors').toEqual([]);

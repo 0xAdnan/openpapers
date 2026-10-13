@@ -22,6 +22,8 @@ test('concurrent saves in two tabs retain both papers', async ({ page, context }
     details(page).getByRole('button', { name: `Save ${EXAMPLES[0].title}`, exact: true }).click(),
     details(other).getByRole('button', { name: `Save ${EXAMPLES[1].title}`, exact: true }).click(),
   ]);
+  await expect(details(page).getByRole('button', { name: `Unsave ${EXAMPLES[0].title}`, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(details(other).getByRole('button', { name: `Unsave ${EXAMPLES[1].title}`, exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.goto('/library');
   await expect(page.locator('.paper-card')).toHaveCount(2);
   await expect(page.getByRole('heading', { name: EXAMPLES[0].title, exact: true })).toBeVisible();
@@ -359,75 +361,114 @@ test('keyword search paginates distinct actual results, restores pages and has a
   await expect(page.locator('.example-card')).toHaveCount(3);
 });
 
-test('server default, provider switching and unavailable Semantic Scholar pages retain source URLs', async ({ page, diagnostics }, testInfo) => {
+test('OpenAlex-only configuration hides source selectors and resets legacy search URLs without S2 requests', async ({ page, diagnostics }, testInfo) => {
   const providersResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/providers');
   await page.goto('/');
   const config = await (await providersResponse).json();
-  const selector = page.locator('main').getByRole('combobox', { name: 'Data source', exact: true });
-  await expect(selector).toHaveValue(config.defaultProvider);
-  await expect(selector.getByRole('option')).toHaveText(config.providers.map((item: { name: string }) => item.name));
+  expect(config.defaultProvider).toBe('openalex');
+  expect(config.providers.map((item: { id: string }) => item.id)).toEqual(['openalex']);
+  await expect(page.locator('select')).toHaveCount(0);
+  await expect(page.getByRole('combobox', { includeHidden: true })).toHaveCount(0);
+  await expect(page.locator('main .provider-hint')).toContainText('OpenAlex');
+  await expect(page.locator('.site-footer')).not.toContainText('Semantic Scholar');
   await expect(page.locator('.section-top')).toContainText('OpenAlex example graph');
-  await selector.selectOption('openalex');
   await page.locator('main').getByRole('textbox', { name: 'Search academic papers' }).fill('learning');
   await page.getByRole('button', { name: 'Build a graph', exact: true }).click();
   await expect(page.locator('.paper-card')).toHaveCount(20);
+  const firstPage = await page.locator('.paper-card h2').allTextContents();
   await page.getByRole('navigation', { name: 'Search result pages' }).getByRole('link', { name: 'Next', exact: true }).click();
   await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'openalex' && url.searchParams.get('page') === '2');
-  diagnostics.expectedFailureUrls.add('/api/search?q=learning&page=1&provider=semantic-scholar');
-  const changed = page.waitForResponse(response => response.url().endsWith('/api/search?q=learning&page=1&provider=semantic-scholar'));
-  await selector.selectOption('semantic-scholar');
-  expect((await changed).status()).toBe(503);
-  await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'semantic-scholar' && !url.searchParams.has('page'));
-  await expect(page.locator('.paper-card')).toHaveCount(0);
-  await expect(page.getByRole('alert')).toContainText('no matching Semantic Scholar cache exists');
-  await expect(selector).toHaveValue('semantic-scholar');
-  await expect(page.getByRole('navigation', { name: 'Search result pages' })).toHaveCount(0);
-  await page.reload();
-  await expect(selector).toHaveValue('semantic-scholar');
-  await expect(page.getByRole('alert')).toContainText('No OpenAlex data is returned as Semantic Scholar');
-  diagnostics.expectedFailureUrls.add('/api/search?q=learning&page=2&provider=semantic-scholar');
-  const pageTwo = page.waitForResponse(response => response.url().endsWith('/api/search?q=learning&page=2&provider=semantic-scholar'));
+  await expect(page.getByRole('navigation', { name: 'Search result pages' })).toContainText('Page 2');
+  await expect(page.locator('.paper-card').first()).toBeVisible();
+  await expect(page.locator('select')).toHaveCount(0);
+
+  // A full navigation exercises configuration loading, not just an in-app source change.
+  await page.goto('/about');
+  const requestsBeforeConfig = diagnostics.searchRequests.length;
+  let releaseConfig!: () => void;
+  const configReleased = new Promise<void>(resolve => { releaseConfig = resolve; });
+  await page.route('**/api/providers', async route => {
+    const response = await route.fetch();
+    await configReleased;
+    await route.fulfill({ response });
+  }, { times: 1 });
   await page.goto('/search?q=learning&page=2&provider=semantic-scholar');
-  expect((await pageTwo).status()).toBe(503);
-  await expect(page).toHaveURL(url => url.searchParams.get('page') === '2' && url.searchParams.get('provider') === 'semantic-scholar');
-  await expect(page.getByRole('alert')).toContainText('Semantic Scholar unavailable');
-  await noHorizontalOverflow(page, testInfo, 'semantic-scholar-offline');
+  await expect(page.getByRole('button', { name: 'Build a graph', exact: true })).toBeDisabled();
+  await expect(page.locator('main .provider-hint')).toContainText('Loading server data sources');
+  await page.locator('.header-search').getByRole('textbox', { name: 'Search academic papers' }).fill('learning');
+  // Allow the 400 ms autocomplete debounce to expire while configuration is withheld.
+  await page.waitForTimeout(600);
+  expect(diagnostics.searchRequests).toHaveLength(requestsBeforeConfig);
+  await expect(page.locator('select')).toHaveCount(0);
+  releaseConfig();
+  await expect(page).toHaveURL(url => url.searchParams.get('q') === 'learning' && !url.searchParams.has('page') && url.searchParams.get('provider') === 'openalex');
+  await expect(page.locator('.paper-card h2')).toHaveText(firstPage);
+  await expect(page.getByRole('navigation', { name: 'Search result pages' })).toContainText('Page 1');
+  await expect(page.locator('select')).toHaveCount(0);
+  await noHorizontalOverflow(page, testInfo, 'restored-openalex-search');
+  await page.reload();
+  await expect(page.locator('.paper-card h2')).toHaveText(firstPage);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/about$/);
+  await expect(page.locator('main')).toContainText('Semantic Scholar search is disabled until');
+  await expect(page.locator('main')).toContainText('OpenAlex, the active search source');
+  await expect(page.locator('.site-footer')).not.toContainText('Semantic Scholar');
+
+  await page.goto('/search?q=learning&page=101&provider=semantic-scholar');
+  await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'openalex' && !url.searchParams.has('page') && url.searchParams.get('q') === 'learning');
+  await expect(page.locator('.paper-card')).toHaveCount(20);
+  await expect(page.getByRole('navigation', { name: 'Search result pages' })).toContainText('Page 1');
   await page.getByRole('link', { name: 'Back to discovery' }).click();
-  await expect(selector).toHaveValue('semantic-scholar');
+  await expect(page.locator('select')).toHaveCount(0);
   await page.locator('.example-card').first().click();
   await expect(nodes(page)).toHaveCount(40);
+  await expect(page.locator('select')).toHaveCount(0);
   await expect(page.locator('.data-badge')).toContainText('OpenAlex');
   await expect(details(page).getByRole('link', { name: 'OpenAlex', exact: true })).toHaveAttribute('href', `https://openalex.org/${EXAMPLES[0].id}`);
+  expect(diagnostics.searchRequests.length).toBeGreaterThan(0);
+  expect(diagnostics.searchRequests.every(url => new URL(url, page.url()).searchParams.get('provider') === 'openalex')).toBe(true);
 });
 
-test('autocomplete clears active papers when switching provider and preserves source on submit and see all', async ({ page, diagnostics }) => {
-  await page.goto('/?provider=openalex');
+test('legacy home URLs use OpenAlex autocomplete, submit and see all while unknown providers still fail', async ({ page, diagnostics }) => {
+  await page.goto('/?provider=semantic-scholar');
+  await expect(page).toHaveURL(url => url.pathname === '/' && url.searchParams.get('provider') === 'openalex');
+  await expect(page.locator('select')).toHaveCount(0);
   const input = page.locator('main').getByRole('textbox', { name: 'Search academic papers' });
   await input.fill(EXAMPLES[0].title);
-  await expect(page.locator('#main-suggestions .suggestion').first()).toBeVisible();
+  await expect(page.locator('#main-suggestions .suggestion').first()).toContainText(EXAMPLES[0].title);
+  await expect(page.locator('#main-suggestions .suggestion-status')).toContainText('Search powered by OpenAlex');
   await input.press('ArrowDown');
   await expect(page.locator('#main-suggestions .suggestion.active')).toHaveCount(1);
-  diagnostics.expectedFailureUrls.add(`/api/search?q=${encodeURIComponent(EXAMPLES[0].title)}&page=1&provider=semantic-scholar`);
-  await page.locator('main').getByRole('combobox', { name: 'Data source', exact: true }).selectOption('semantic-scholar');
+  await input.press('Escape');
   await input.focus();
-  await expect(page.locator('#main-suggestions .suggestion')).toHaveCount(0);
-  await expect(page.locator('#main-suggestions .suggestion-status')).toContainText('Semantic Scholar unavailable');
+  await expect(page.locator('#main-suggestions .suggestion.active')).toHaveCount(0);
   await input.press('Enter');
-  await expect(page).toHaveURL(url => url.pathname === '/search' && url.searchParams.get('provider') === 'semantic-scholar');
-  await expect(page.getByRole('alert')).toContainText('Semantic Scholar unavailable');
-  await input.focus();
-  await expect(page.locator('#main-suggestions .suggestion-status')).toContainText('Semantic Scholar unavailable');
-  await page.getByRole('button', { name: 'See all paper suggestions' }).click();
-  await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'semantic-scholar' && url.searchParams.get('q') === EXAMPLES[0].title);
-  await page.locator('main').getByRole('combobox', { name: 'Data source', exact: true }).selectOption('openalex');
+  await expect(page).toHaveURL(url => url.pathname === '/search' && url.searchParams.get('provider') === 'openalex');
   await expect(page.locator('.paper-card').first().getByRole('heading')).toHaveText(EXAMPLES[0].title);
+  await input.focus();
+  await expect(page.locator('#main-suggestions .suggestion-status')).toContainText('Search powered by OpenAlex');
+  await page.getByRole('button', { name: 'See all paper suggestions' }).click();
+  await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'openalex' && url.searchParams.get('q') === EXAMPLES[0].title);
+  await expect(page.locator('.paper-card').first().getByRole('heading')).toHaveText(EXAMPLES[0].title);
+  const headerInput = page.locator('.header-search').getByRole('textbox', { name: 'Search academic papers' });
+  await headerInput.fill('learning');
+  await expect(page.locator('#header-suggestions .suggestion-status')).toContainText('Search powered by OpenAlex');
+  await headerInput.press('Escape');
+  await headerInput.press('Enter');
+  await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'openalex' && url.searchParams.get('q') === 'learning');
+  await expect(page.locator('.paper-card')).toHaveCount(20);
   const unknown = '/api/search?q=learning&page=2&provider=unknown-source';
   diagnostics.expectedFailureUrls.add(unknown);
   const invalid = page.waitForResponse(response => response.url().endsWith(unknown));
   await page.goto('/search?q=learning&page=2&provider=unknown-source');
   expect((await invalid).status()).toBe(400);
   await expect(page.getByRole('alert')).toContainText('Provider must be openalex or semantic-scholar');
+  await expect(page.locator('.paper-card')).toHaveCount(0);
   await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'unknown-source' && url.searchParams.get('page') === '2');
+  await expect(page.locator('select')).toHaveCount(0);
+  await expect(page.getByRole('combobox', { includeHidden: true })).toHaveCount(0);
+  expect(diagnostics.searchRequests.some(url => new URL(url, page.url()).searchParams.get('provider') === 'openalex')).toBe(true);
+  expect(diagnostics.searchRequests.some(url => new URL(url, page.url()).searchParams.get('provider') === 'semantic-scholar')).toBe(false);
 });
 
 test('mixed-source saved papers preserve selections and download source-aware citations', async ({ page, request, diagnostics }, testInfo) => {
@@ -468,6 +509,7 @@ test('mixed-source saved papers preserve selections and download source-aware ci
   expect(csv.match(/Data source: Semantic Scholar; API\/data terms apply/g)).toHaveLength(2);
   expect(csv).toContain(`"${s2.id}"`);
   await expect(page.locator('.site-footer')).toContainText('Code MIT / Data licenses');
+  await expect(page.locator('.site-footer').getByRole('link', { name: 'Semantic Scholar data & terms' })).toBeVisible();
   await expect(page.locator('.site-footer')).not.toContainText('MIT / CC0');
   diagnostics.expectedFailureUrls.add(`/api/graph?ids=${encodeURIComponent(s2.id)}`);
   const unavailable = page.waitForResponse(response => response.url().endsWith(`/api/graph?ids=${encodeURIComponent(s2.id)}`));
@@ -478,30 +520,33 @@ test('mixed-source saved papers preserve selections and download source-aware ci
   await noHorizontalOverflow(page, testInfo, 'saved-s2-unavailable-graph');
 });
 
-test('mobile source selectors remain reachable on home, navigation and offline search without overflow', async ({ page, diagnostics }, testInfo) => {
+test('mobile home, navigation and keyboard search have no source dropdown or S2 requests', async ({ page, diagnostics }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
-  await page.locator('main').getByRole('combobox', { name: 'Data source', exact: true }).selectOption('semantic-scholar');
-  await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'semantic-scholar');
-  await noHorizontalOverflow(page, testInfo, 'mobile-s2-home');
+  await page.goto('/?provider=semantic-scholar');
+  await expect(page).toHaveURL(url => url.searchParams.get('provider') === 'openalex');
+  await expect(page.locator('select')).toHaveCount(0);
+  await noHorizontalOverflow(page, testInfo, 'mobile-openalex-home');
   await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
-  const navSelector = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('combobox', { name: 'Search source', exact: true });
-  await expect(navSelector).toBeVisible();
-  await expect(navSelector).toHaveValue('semantic-scholar');
-  await navSelector.selectOption('openalex');
-  await expect(page.locator('main').getByRole('combobox', { name: 'Data source', exact: true })).toHaveValue('openalex');
-  await noHorizontalOverflow(page, testInfo, 'mobile-source-navigation');
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+  await expect(page.locator('select')).toHaveCount(0);
+  await noHorizontalOverflow(page, testInfo, 'mobile-openalex-navigation');
   await page.getByRole('button', { name: 'Close navigation', exact: true }).click();
-  await page.locator('main').getByRole('combobox', { name: 'Data source', exact: true }).selectOption('semantic-scholar');
-  const query = S2_SAVED_PAPERS[0].id;
-  diagnostics.expectedFailureUrls.add(`/api/search?q=${encodeURIComponent(query)}&page=1&provider=semantic-scholar`);
-  await page.locator('main').getByRole('textbox', { name: 'Search academic papers' }).fill(query);
-  await page.getByRole('button', { name: 'Build a graph', exact: true }).click();
-  await expect(page).toHaveURL(url => url.pathname === '/search' && url.searchParams.get('provider') === 'semantic-scholar');
-  await expect(page.getByRole('alert')).toContainText('Semantic Scholar unavailable');
-  await expect(page.locator('main').getByRole('combobox', { name: 'Data source', exact: true })).toHaveValue('semantic-scholar');
-  await noHorizontalOverflow(page, testInfo, 'mobile-s2-search');
-  await screenshot(page, testInfo, 'mobile-s2-offline');
+  const input = page.locator('main').getByRole('textbox', { name: 'Search academic papers' });
+  await input.fill('learning');
+  await expect(page.locator('#main-suggestions .suggestion-status')).toContainText('Search powered by OpenAlex');
+  await input.press('Escape');
+  await input.press('Enter');
+  await expect(page).toHaveURL(url => url.pathname === '/search' && url.searchParams.get('provider') === 'openalex');
+  await expect(page.locator('.paper-card')).toHaveCount(20);
+  await expect(page.locator('select')).toHaveCount(0);
+  await noHorizontalOverflow(page, testInfo, 'mobile-openalex-search');
+  await screenshot(page, testInfo, 'mobile-openalex-search');
+  await page.getByRole('navigation', { name: 'Search result pages' }).getByRole('link', { name: 'Next', exact: true }).click();
+  await expect(page).toHaveURL(url => url.searchParams.get('page') === '2' && url.searchParams.get('provider') === 'openalex');
+  await expect(page.getByRole('navigation', { name: 'Search result pages' })).toContainText('Page 2');
+  await noHorizontalOverflow(page, testInfo, 'mobile-openalex-page-2');
+  expect(diagnostics.searchRequests.length).toBeGreaterThan(0);
+  expect(diagnostics.searchRequests.every(url => new URL(url, page.url()).searchParams.get('provider') === 'openalex')).toBe(true);
 });
 
 test('graph selection adds second and third origins, preserves them on reload and enforces the limit', async ({ page }) => {

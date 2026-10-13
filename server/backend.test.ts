@@ -438,16 +438,106 @@ test('provider discovery validates DEFAULT_PROVIDER, redacts keys and keeps Open
     assert.ok(oaGraph.nodes.every(paper => /^W\d+$/.test(paper.id)));
   }
   delete process.env.DEFAULT_PROVIDER;
-  const { server, origin } = await listen(createApp({ service, semanticService }).app);
-  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
-  assert.equal((await (await fetch(`${origin}/api/providers`)).json()).defaultProvider, 'openalex');
   delete process.env.OPENALEX_API_KEY;
   delete process.env.S2_API_KEY;
-  assert.ok((await (await fetch(`${origin}/api/providers`)).json()).providers.every((provider: { keyConfigured: boolean }) => !provider.keyConfigured));
+  const { server, origin } = await listen(createApp({ service, semanticService }).app);
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const unconfigured = await (await fetch(`${origin}/api/providers`)).json();
+  assert.equal(unconfigured.defaultProvider, 'openalex');
+  assert.equal(unconfigured.providers.length, 1);
+  assert.equal(unconfigured.providers[0].id, 'openalex');
+  assert.equal(unconfigured.providers[0].keyConfigured, false);
   assert.equal(calls, 0);
 });
 
+test('without an S2 key, a Semantic Scholar default falls back to OpenAlex and blocks even cached S2 search without affecting saved papers/graphs', async t => {
+  const saved = { DEFAULT_PROVIDER: process.env.DEFAULT_PROVIDER, OPENALEX_API_KEY: process.env.OPENALEX_API_KEY, S2_API_KEY: process.env.S2_API_KEY };
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  process.env.DEFAULT_PROVIDER = 'semantic-scholar';
+  delete process.env.OPENALEX_API_KEY;
+  delete process.env.S2_API_KEY;
+  const cache = new PersistentCache(await temporary(t));
+  await cache.set('search:1:providerfixture', { results: [fixture('W900001')], total: 1, page: 1, perPage: 20,
+    meta: { source: 'live', fetchedAt: cachedDate } });
+  await cache.set('s2:search:v1:1:providerfixture', { results: [s2Fixture(1)], total: 1, page: 1, perPage: 20,
+    meta: { source: 'live', provider: 'semantic-scholar', fetchedAt: cachedDate } });
+  await cache.set(`s2:pool:v1:${s2Id(1)}`, { origin: s2Id(1), papers: [s2Fixture(1)], provider: 'semantic-scholar',
+    source: 'live', fetchedAt: cachedDate, coverage: 'Saved Semantic Scholar fixture' });
+  await cache.set('pool:W900001', { origin: 'W900001', papers: [fixture('W900001')], source: 'live',
+    fetchedAt: cachedDate, coverage: 'Saved OpenAlex fixture' });
+  let calls = 0;
+  const noFetch = async () => { calls++; throw new Error('Unexpected upstream traffic'); };
+  const service = new PaperService(cache, false, new OpenAlexProvider({ cache, fetch: noFetch }));
+  const semanticService = new SemanticService(cache, false, new SemanticScholarProvider({ cache, fetch: noFetch }));
+  await Promise.all([service.ready, semanticService.ready]);
+  const cached = await semanticService.search('providerfixture', 1);
+  assert.equal(cached.meta.source, 'cache');
+  assert.equal(cached.results[0].id, s2Id(1));
+  for (const defaultProvider of [undefined, 'semantic-scholar'] as const) {
+    const { server, origin } = await listen(createApp({ service, semanticService, defaultProvider, offline: false }).app);
+    t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+    const discovery = await fetch(`${origin}/api/providers`);
+    assert.equal(discovery.status, 200);
+    assert.deepEqual(await discovery.json(), { defaultProvider: 'openalex', providers: [
+      { id: 'openalex', name: 'OpenAlex', keyConfigured: false, offline: false },
+    ] });
+    const health = await fetch(`${origin}/api/health`);
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), { status: 'ok', provider: 'OpenAlex', offline: false });
+    for (const suffix of ['', '&provider=openalex']) {
+      const response = await fetch(`${origin}/api/search?q=providerfixture${suffix}`);
+      assert.equal(response.status, 200);
+      const result = await response.json() as SearchResponse;
+      assert.equal(result.meta.provider, 'openalex');
+      assert.equal(result.meta.source, 'cache');
+      assert.equal(result.meta.fetchedAt, cachedDate);
+      assert.equal(result.results[0].id, 'W900001');
+    }
+    for (const query of ['providerfixture', 'uncachedfixture']) {
+      const response = await fetch(`${origin}/api/search?q=${query}&provider=semantic-scholar`);
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { error: 'Semantic Scholar search is disabled until S2_API_KEY is configured. Use OpenAlex instead.' });
+    }
+    for (const id of ['W900001', s2Id(1)]) {
+      const provider = id.startsWith('S2:') ? 'semantic-scholar' : 'openalex';
+      for (const suffix of ['', `&provider=${provider}`]) {
+        const response = await fetch(`${origin}/api/graph?ids=${id}${suffix}`);
+        assert.equal(response.status, 200);
+        const graph = await response.json() as GraphResponse;
+        assert.deepEqual(graph.origins, [id]);
+        assert.equal(graph.meta.provider, provider);
+        assert.ok(graph.nodes.some(paper => paper.id === id && paper.isOrigin));
+        if (provider === 'semantic-scholar') {
+          assert.equal(graph.meta.source, 'cache');
+          assert.equal(graph.meta.fetchedAt, cachedDate);
+        }
+      }
+      for (const suffix of ['', `?provider=${provider}`]) {
+        const response = await fetch(`${origin}/api/paper/${id}${suffix}`);
+        assert.equal(response.status, 200);
+        const result = await response.json();
+        assert.equal(result.paper.id, id);
+        assert.equal(result.meta.provider, provider);
+        if (provider === 'semantic-scholar') {
+          assert.equal(result.meta.source, 'cache');
+          assert.equal(result.meta.fetchedAt, cachedDate);
+        }
+      }
+    }
+  }
+  assert.equal(calls, 0, 'Disabled S2 search and saved graph/paper access must not fetch upstream');
+});
+
 test('API infers graph/paper providers, accepts three full S2 IDs and rejects invalid selectors before fetch', async t => {
+  const savedKey = process.env.S2_API_KEY;
+  t.after(() => {
+    if (savedKey === undefined) delete process.env.S2_API_KEY; else process.env.S2_API_KEY = savedKey;
+  });
+  process.env.S2_API_KEY = 'mock-s2-validation-key';
   const cache = new PersistentCache(await temporary(t));
   for (let n = 1; n <= 3; n++) {
     await cache.set(`s2:pool:v1:${s2Id(n)}`, { origin: s2Id(n), papers: [s2Fixture(n)], provider: 'semantic-scholar',
@@ -511,9 +601,14 @@ test('API infers graph/paper providers, accepts three full S2 IDs and rejects in
 });
 
 test('S2 API live and empty cached search/paper responses retain source, provider, dates and server-only keys', async t => {
+  const savedKey = process.env.S2_API_KEY;
+  t.after(() => {
+    if (savedKey === undefined) delete process.env.S2_API_KEY; else process.env.S2_API_KEY = savedKey;
+  });
   const directory = await temporary(t);
   const store = new PersistentCache(directory);
   const secret = 'private-s2-api-response-key';
+  process.env.S2_API_KEY = secret;
   let calls = 0;
   const provider = new SemanticScholarProvider({ cache: store, apiKey: secret, fetch: async (input, options) => {
     calls++;
@@ -556,9 +651,14 @@ test('S2 API live and empty cached search/paper responses retain source, provide
 });
 
 test('uncached S2 API outages/offline failures are actionable 503s without relabeled OpenAlex matches or key leaks', async t => {
+  const savedKey = process.env.S2_API_KEY;
+  t.after(() => {
+    if (savedKey === undefined) delete process.env.S2_API_KEY; else process.env.S2_API_KEY = savedKey;
+  });
+  const secret = 'private-unavailable-s2-key';
+  process.env.S2_API_KEY = secret;
   for (const offline of [false, true]) {
     const cache = new PersistentCache(await temporary(t));
-    const secret = 'private-unavailable-s2-key';
     let calls = 0;
     const provider = new SemanticScholarProvider({ cache, apiKey: secret, fetch: async () => {
       calls++; return new Response(`${secret} private upstream response`, { status: 503 });

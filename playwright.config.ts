@@ -15,9 +15,9 @@ export default defineConfig({
   },
   webServer: {
     command: 'npm start',
-    env: { OFFLINE: '1', DEFAULT_PROVIDER: 'openalex', PORT: '43127', HOST: '127.0.0.1' },
+    env: { OFFLINE: '1', S2_API_KEY: '', DEFAULT_PROVIDER: 'openalex', PORT: '43127', HOST: '127.0.0.1' },
     url: 'http://127.0.0.1:43127/api/health',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 30000,
   },
 });

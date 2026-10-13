@@ -64,9 +64,21 @@ export default function App() {
   const [params, setParams] = useSearchParams();
   const { pathname } = useLocation();
   const rawProvider = pathname === '/' || pathname === '/search' ? params.get('provider') : null;
-  const provider = rawProvider === 'openalex' || rawProvider === 'semantic-scholar' ? rawProvider : chosen ?? config?.defaultProvider;
-  useEffect(() => { if (rawProvider === 'openalex' || rawProvider === 'semantic-scholar') setChosen(rawProvider); }, [rawProvider]);
+  const knownProvider = rawProvider === 'openalex' || rawProvider === 'semantic-scholar' ? rawProvider : undefined;
+  const preferred = knownProvider ?? chosen;
+  const provider = config?.providers.find(item => item.id === preferred)?.id ?? config?.providers.find(item => item.id === config.defaultProvider)?.id;
+  // Wait for configuration, but let unknown URL providers reach the API's validation.
+  const searchProvider = !config || (knownProvider && knownProvider !== provider) ? undefined : rawProvider !== null && !knownProvider ? rawProvider : provider;
+  useEffect(() => {
+    if (!config || !provider) return;
+    setChosen(provider);
+    if (knownProvider && knownProvider !== provider) {
+      const next = new URLSearchParams(params); next.set('provider', provider); next.delete('page');
+      setParams(next, { replace: true });
+    }
+  }, [config, provider, knownProvider, params, setParams]);
   function choose(nextProvider: ProviderId) {
+    if (!config?.providers.some(item => item.id === nextProvider)) return;
     setChosen(nextProvider);
     if (pathname === '/' || pathname === '/search') {
       const next = new URLSearchParams(params); next.set('provider', nextProvider); next.delete('page'); setParams(next);
@@ -94,7 +106,7 @@ export default function App() {
       else update();
     } catch { setMessage('Could not save: browser storage is unavailable or full.'); }
   }
-  return <ProviderContext value={{ provider, searchProvider: rawProvider ?? provider, config, error: providerError, choose }}><LibraryContext value={{ papers, toggle, notify: setMessage }}>
+  return <ProviderContext value={{ provider, searchProvider, config, error: providerError, choose }}><LibraryContext value={{ papers, toggle, notify: setMessage }}>
     <a className="skip-link" href="#main">Skip to content</a>
     <Header />
     <Routes>
@@ -133,12 +145,13 @@ function ProviderSelector({ compact = false }: { compact?: boolean }) {
   const { provider, searchProvider, config, error, choose } = useContext(ProviderContext);
   const status = config?.providers.find(item => item.id === provider);
   const invalid = searchProvider !== undefined && searchProvider !== 'openalex' && searchProvider !== 'semantic-scholar';
+  const multiple = config && config.providers.length > 1;
+  if (compact && !multiple) return null;
   return <div className={`provider-control ${compact ? 'compact-provider' : ''}`}>
-    <label className="provider-label">{compact ? 'Search source' : 'Data source'}<select value={provider ?? ''} disabled={!config} onChange={event => choose(event.target.value as ProviderId)}>
-      {!config && <option value="">{error ? 'Sources unavailable' : 'Loading sources...'}</option>}
+    {multiple && <label className="provider-label">{compact ? 'Search source' : 'Data source'}<select value={provider ?? ''} onChange={event => choose(event.target.value as ProviderId)}>
       {config?.providers.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-    </select></label>
-    {!compact && <p className="provider-hint">{error ?? (invalid ? 'Unknown provider in this URL. Choose a supported data source to search.' : status?.offline ? `${status.name}: offline, cached data only${provider === 'openalex' ? ' and bundled examples' : ''}.` : provider ? `${providerName(provider)} API availability and quotas apply.` : 'Loading server data sources...')}</p>}
+    </select></label>}
+    {!compact && <p className="provider-hint">{error ?? (invalid ? 'Unknown provider in this URL. Return to discovery to search a supported data source.' : status?.offline ? `${status.name}: offline, cached data only${provider === 'openalex' ? ' and bundled examples' : ''}.` : provider ? `${providerName(provider)} API availability and quotas apply.` : 'Loading server data sources...')}</p>}
   </div>;
 }
 
@@ -379,13 +392,18 @@ function LibraryPage() {
 }
 
 function About() {
+  const { config } = useContext(ProviderContext);
+  const semanticSearch = config?.providers.some(item => item.id === 'semantic-scholar');
   return <main id="main" className="reading-page"><Link className="back-link" to="/"><ArrowLeft size={16} />Back to discovery</Link><span className="eyebrow">THE METHOD BEHIND THE MAP</span><h1>Research is connected.<br />Discovery should be open.</h1><p className="reading-lead">Open Papers is an independent, open-source literature discovery tool inspired by the public workflow of Connected Papers. It is not affiliated with Connected Papers and does not use its private API or proprietary code.</p>
-    <section><h2>How does it work?</h2><p>Choose OpenAlex or Semantic Scholar as your search source, then start with a paper. We collect a sampled neighborhood of references, citing papers, and works sharing references from that source, compare the citation evidence, and select up to 40 connected papers. The server supplies the default source; your choice is retained while browsing and included in search links.</p><div className="method-steps"><article><span>01</span><h3>Shared references</h3><p>Two papers with overlapping bibliographies may explore similar subjects. We normalize the overlap by the size of both reference lists.</p></article><article><span>02</span><h3>Co-citations</h3><p>When other papers cite two works together, that is another signal of relatedness. Our counts are limited to the fetched sample.</p></article><article><span>03</span><h3>A visual neighborhood</h3><p>A force-directed layout groups connected papers. Larger nodes have more citations; darker teal nodes are newer. Magenta outlines mark origins.</p></article></div><p>Similarity is the average of the cosine-normalized shared-reference and co-citation scores. We do not invent edges to fill a graph or use topic labels as substitute citations. Semantic Scholar is also the upstream source named by Connected Papers, but using the same source does not reproduce its candidate selection, ranking, or proprietary algorithm.</p></section>
+    <section><h2>How does it work?</h2><p>{semanticSearch ? 'Choose OpenAlex or Semantic Scholar as your search source, then start with a paper.' : 'Start with a paper using OpenAlex, the active search source.'} We collect a sampled neighborhood of references, citing papers, and works sharing references from that source, compare the citation evidence, and select up to 40 connected papers. Search links include the source, and existing saved papers retain their original source.</p><div className="method-steps"><article><span>01</span><h3>Shared references</h3><p>Two papers with overlapping bibliographies may explore similar subjects. We normalize the overlap by the size of both reference lists.</p></article><article><span>02</span><h3>Co-citations</h3><p>When other papers cite two works together, that is another signal of relatedness. Our counts are limited to the fetched sample.</p></article><article><span>03</span><h3>A visual neighborhood</h3><p>A force-directed layout groups connected papers. Larger nodes have more citations; darker teal nodes are newer. Magenta outlines mark origins.</p></article></div><p>Similarity is the average of the cosine-normalized shared-reference and co-citation scores. We do not invent edges to fill a graph or use topic labels as substitute citations. This independent method does not reproduce Connected Papers' candidate selection, ranking, or proprietary algorithm.</p></section>
     <section><h2>Read the work before and after</h2><p><strong>Prior works</strong> are papers referenced by multiple papers in your graph. <strong>Derivative works</strong> cite multiple graph papers. The tables show actual graph connection counts, not claims that a work is definitively foundational or a comprehensive survey.</p></section>
-    <section><h2>Open data, with honest limitations</h2><p><a href="https://openalex.org" target="_blank" rel="noreferrer">OpenAlex</a> metadata is available under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0</a>. Our existing bundled examples are OpenAlex neighborhoods with acquisition timestamps and provenance; selecting Semantic Scholar does not relabel or replace them.</p><p><a href="https://www.semanticscholar.org" target="_blank" rel="noreferrer">Semantic Scholar</a> records come from its official API. Its <a href="https://www.semanticscholar.org/product/api" target="_blank" rel="noreferrer">API terms</a> and underlying data licenses apply, including attribution requirements; this data is not blanket CC0. CSV and BibTeX exports retain Semantic Scholar attribution. No Semantic Scholar data bundle is redistributed with this application.</p><p>The sources have different coverage, identifiers, API access requirements, and quotas. Live search and new neighborhoods depend on the selected API's availability and server configuration. Semantic Scholar relevance search exposes only the first 1,000 results (pages 1-50); its total is approximate. Offline Semantic Scholar access requires a matching cache, and never substitutes OpenAlex records.</p><div className="notice"><Info size={19} /><p>Our neighborhoods sample hundreds of candidates, not the roughly 50,000 described by Connected Papers. OpenAlex sampling can favor influential works; Semantic Scholar reference and citation API order is unspecified. Either sample can miss recent or niche research. A missing connection does not imply that papers are unrelated.</p></div><p>Titles, abstracts, and reference lists can be incomplete. The displayed source and fetched date identify the provenance and age of the data. A cached graph is not a live citation counter. Combined graphs require origins from one source because cross-provider identities have not been reconciled.</p></section>
+    <section><h2>Open data, with honest limitations</h2><p><a href="https://openalex.org" target="_blank" rel="noreferrer">OpenAlex</a> metadata is available under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0</a>. Our bundled examples are OpenAlex neighborhoods with acquisition timestamps and provenance; another backend does not relabel or replace them.</p><p>Live search and new neighborhoods depend on API availability, quotas, and server configuration. Offline OpenAlex search uses only bundled and matching cached records.</p><div className="notice"><Info size={19} /><p>Our neighborhoods sample hundreds of candidates, not the roughly 50,000 described by Connected Papers. OpenAlex sampling can favor influential works and miss recent or niche research. A missing connection does not imply that papers are unrelated.</p></div><p>Titles, abstracts, and reference lists can be incomplete. The displayed source and fetched date identify the provenance and age of the data. A cached graph is not a live citation counter. Combined graphs require origins from one source because cross-provider identities have not been reconciled.</p></section>
+    <section><h2>Optional Semantic Scholar backend</h2><p>{semanticSearch ? 'This server also offers Semantic Scholar search; API access and quotas still apply.' : <>Semantic Scholar search is disabled until a server-only <code>S2_API_KEY</code> is configured, and its search option stays hidden without that key.</>} The backend remains available for existing saved Semantic Scholar paper IDs and source links.</p><p><a href="https://www.semanticscholar.org/product/api" target="_blank" rel="noreferrer">Semantic Scholar API terms</a> and underlying data licenses apply to its records, including attribution requirements; this data is not blanket CC0. CSV and BibTeX exports retain Semantic Scholar attribution. No Semantic Scholar data bundle is redistributed with this application. Offline access requires a matching Semantic Scholar cache and never substitutes OpenAlex records.</p>{semanticSearch && <p>Semantic Scholar relevance search exposes only the first 1,000 results (pages 1-50); its total is approximate. Reference and citation API order is unspecified, so sampled neighborhoods can miss recent or niche research.</p>}</section>
     <section><h2>Your library stays local</h2><p>No sign-in is required. Saved papers from both sources are stored in this browser's local storage, not on our server. Export as BibTeX or CSV to move your library elsewhere. There is no cross-device sync, user tracking, advertising, or paid tier in this implementation.</p></section><section><h2>Built to be inspected</h2><p>The application code is MIT licensed; data licenses are separate and depend on the source. The backend, data refresh script, edge formula, and graph exports are included in this project. Browse the <a href="https://github.com/0xAdnan/openpapers" target="_blank" rel="noreferrer">Open Papers source repository</a> to inspect or self-host the application.</p></section><Footer /></main>;
 }
 
 function Footer() {
-  return <footer className="site-footer"><span>Open Papers · Independent & open source</span><div><Link to="/about">Methodology & privacy</Link><a href="https://openalex.org" target="_blank" rel="noreferrer">OpenAlex data <ExternalLink size={12} /></a><a href="https://www.semanticscholar.org/product/api" target="_blank" rel="noreferrer">Semantic Scholar data & terms <ExternalLink size={12} /></a><span>Code MIT / Data licenses</span></div></footer>;
+  const { papers } = useContext(LibraryContext);
+  const { config } = useContext(ProviderContext);
+  return <footer className="site-footer"><span>Open Papers · Independent & open source</span><div><Link to="/about">Methodology & privacy</Link><a href="https://openalex.org" target="_blank" rel="noreferrer">OpenAlex data <ExternalLink size={12} /></a>{(config?.providers.some(item => item.id === 'semantic-scholar') || papers.some(paper => paperProvider(paper.id) === 'semantic-scholar')) && <a href="https://www.semanticscholar.org/product/api" target="_blank" rel="noreferrer">Semantic Scholar data & terms <ExternalLink size={12} /></a>}<span>Code MIT / Data licenses</span></div></footer>;
 }

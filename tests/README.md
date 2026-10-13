@@ -5,9 +5,12 @@ npm run build
 npm run test:e2e
 ```
 
-The suite serves the production application in guaranteed offline mode at
+The suite serves the production application in guaranteed offline mode with
+`S2_API_KEY` unset (OpenAlex-only search) at
 `http://127.0.0.1:43127`, using `/usr/bin/google-chrome`. Set `CHROME_PATH` for
 a different browser executable. It does not modify or stop unrelated services.
+Unset any inherited `S2_API_KEY` before running, for example
+`env -u S2_API_KEY npm run test:e2e`.
 
 ## Coverage
 
@@ -21,11 +24,17 @@ a different browser executable. It does not modify or stop unrelated services.
 - Graph zoom/fit/help, modal containment and restored opener focus.
 - Desktop 1440x900, phone 390x844, tablet 834x1112 and document overflow checks.
 - Runtime errors, CSP console errors, unexpected HTTP/network failures.
-- Server-configured search sources, provider switching/URL propagation and S2 offline failures.
+- No source dropdown on home, header/navigation, search, or graph pages with OpenAlex-only configuration.
+- Legacy S2 home/search URL replacement, query preservation, pagination reset to page 1, reload/back restoration, and unknown-provider HTTP 400 errors without normalization.
+- Delayed real provider configuration blocks results and header autocomplete requests until OpenAlex is available; no S2 request escapes during recovery.
+- OpenAlex autocomplete, submit/see-all links, pagination, and mobile keyboard search with no S2 search requests.
 - Same-source combined graph enforcement and source-correct S2 BibTeX/CSV exports from synthetic saved records.
 
 All normal workflow tests use actual application responses, not API or UI mocks.
-Semantic Scholar live metadata is not mocked into the browser. Its offline failure
+The configuration-loading regression delays an actual backend response without
+changing its content. Every ordinary browser search must explicitly use OpenAlex.
+Live keyed Semantic Scholar search and multi-source selection are not exercised here.
+Semantic Scholar live metadata is not mocked into the browser. Its saved-graph offline failure
 is exercised through the real backend; export/library tests use explicitly synthetic
 saved S2 fixtures, not evidence of scholarly correctness.
 Malformed-data testing seeds intentionally invalid local storage to verify recovery.
@@ -33,7 +42,7 @@ Backend provider stubs are separate and test error/lifecycle contracts; they do 
 establish live provider ranking correctness.
 
 Requests are paced to respect the production rate limiter rather than disabling
-it for tests. Expected invalid-ID 400/404 responses are explicitly scoped; other
+it for tests. Expected invalid-ID/provider 400/404 and saved-S2-graph 503 responses are explicitly scoped; other
 console/HTTP errors fail verification.
 
 ## Historical Findings
