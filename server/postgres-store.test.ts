@@ -94,7 +94,7 @@ test('PostgreSQL durable graph store', { skip: !process.env.GRAPH_TEST_DATABASE_
     const tables = await sql.query(`SELECT c.relname, c.relrowsecurity, pg_get_userbyid(c.relowner) AS owner,
       coalesce((SELECT bool_or(privilege_type IS NOT NULL) FROM aclexplode(c.relacl) WHERE grantee = 0), false) AS public_access
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'openpapers' AND c.relkind = 'r'`);
-    assert.equal(tables.rows.length, 6);
+    assert.equal(tables.rows.length, 7);
     for (const row of tables.rows) { assert.equal(row.relrowsecurity, true); assert.equal(row.owner, 'postgres'); assert.equal(row.public_access, false); }
     assert.equal((await sql.query(`SELECT count(*)::integer AS count FROM pg_policies WHERE schemaname = 'openpapers'`)).rows[0].count, 0);
     for (const role of ['anon', 'authenticated', 'service_role']) {

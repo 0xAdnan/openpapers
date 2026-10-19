@@ -191,7 +191,7 @@ test('429 has no retries, honors Retry-After with a 60-second minimum and suppre
   for (const retry of ['1', '120', new Date(Date.now() + 180000).toUTCString(), 'invalid']) {
     const { cache } = await setup(t);
     let calls = 0;
-    const provider = new SemanticScholarProvider({ cache, apiKey: 'private-rate-key', fetch: async () => {
+    const provider = new SemanticScholarProvider({ cache, apiKey: `private-rate-key-${retry}`, fetch: async () => {
       calls++; return new Response('private-rate-key upstream details', { status: 429, headers: { 'Retry-After': retry } });
     } });
     const results = await Promise.allSettled([provider.getPaper(id(1)), provider.getPaper(id(2))]);
@@ -207,6 +207,23 @@ test('429 has no retries, honors Retry-After with a 60-second minimum and suppre
     await assert.rejects(provider.getPaper(id(3)), e => e instanceof SemanticScholarError && e.status === 429);
     assert.equal(calls, 1);
     assert.deepEqual(await cache.list('s2:raw:'), []);
+  }
+});
+
+test('failed lease release preserves terminal 404 but fails closed for other transport outcomes', async t => {
+  for (const status of [404, 429, 503, 200]) {
+    const { cache } = await setup(t);
+    let calls = 0, releases = 0;
+    const provider = new SemanticScholarProvider({ cache, rateLimiter: { reserve: async () => ({
+      assertValid() {}, release: async () => { releases++; throw new Error('Private cleanup detail'); },
+    }) }, fetch: async () => {
+      calls++;
+      return status === 200 ? Response.json(record(1)) : new Response('Private upstream detail', { status });
+    } });
+    await assert.rejects(provider.getPaper(id(1)), e => e instanceof SemanticScholarError &&
+      e.status === (status === 404 ? 404 : 503) && !e.message.includes('Private'));
+    assert.equal(calls, 1);
+    assert.equal(releases, 1);
   }
 });
 
@@ -333,7 +350,8 @@ test('sample collection uses documented BasePaper fields then hydrates outgoing 
   assert.match(graph.meta.coverage, /missing references.*empty arrays/);
   assert.equal(GraphResponseSchema.safeParse(graph).success, true);
   assert.equal(CandidatePoolSchema.safeParse((await cache.get(`s2:pool:v1:${id(1)}`))!.value).success, true);
-  assert.equal(calls.length, 5);
+  assert.deepEqual(calls, [`/graph/v1/paper/${sha(1)}`, `/graph/v1/paper/${sha(1)}/references`,
+    '/graph/v1/paper/batch', `/graph/v1/paper/${sha(1)}/citations`, '/graph/v1/paper/batch', '/graph/v1/paper/batch']);
   assert.ok(calls.every(p => p.startsWith('/graph/v1/paper/')));
 });
 

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import type { DataMeta, Paper } from '../shared/types.ts';
 import { PersistentCache } from './cache.ts';
+import { createSemanticRateLimiter, semanticRetryAfter, SemanticRateLimitError,
+  type SemanticRateLimiter, type SemanticRateReservation } from './semantic-rate-limit.ts';
 
 export const S2_ORIGIN = 'https://api.semanticscholar.org';
 export const S2_FIELDS = 'title,authors,year,venue,citationCount,referenceCount,abstract,externalIds,url,openAccessPdf,isOpenAccess,fieldsOfStudy';
@@ -105,14 +106,11 @@ export function normalizeSemanticPaper(value: SemanticPaper): Paper {
 }
 
 export class SemanticScholarProvider {
-  private active = false;
-  private waiting: (() => void)[] = [];
-  private nextStart = 0;
-  private cooldownUntil = 0;
+  private rateLimiter?: SemanticRateLimiter;
   private provenance = new WeakMap<object, { meta: DataMeta; expiresAt: number }>();
 
   constructor(private options: { cache: PersistentCache; apiKey?: string; offline?: boolean;
-    fetch?: typeof fetch; timeoutMs?: number }) {}
+    fetch?: typeof fetch; timeoutMs?: number; databaseUrl?: string; rateLimiter?: SemanticRateLimiter }) {}
 
   metadata(data: object): DataMeta {
     return this.provenance.get(data)?.meta ?? { provider: 'semantic-scholar', source: 'live',
@@ -133,36 +131,6 @@ export class SemanticScholarProvider {
         if (row.citingPaper) this.provenance.set(row.citingPaper, provenance);
       }
     }
-  }
-
-  private async slot(signal: AbortSignal) {
-    signal.throwIfAborted();
-    if (this.active) {
-      if (this.waiting.length >= 16) throw new SemanticScholarError(503, 'Semantic Scholar request queue is full');
-      await new Promise<void>((resolve, reject) => {
-        const grant = () => { signal.removeEventListener('abort', cancel); resolve(); };
-        const cancel = () => {
-          const index = this.waiting.indexOf(grant);
-          if (index >= 0) this.waiting.splice(index, 1);
-          reject(signal.reason);
-        };
-        this.waiting.push(grant);
-        signal.addEventListener('abort', cancel, { once: true });
-      });
-    } else this.active = true;
-    try {
-      signal.throwIfAborted();
-      if (Date.now() < this.cooldownUntil) throw new SemanticScholarError(429, 'Semantic Scholar rate limit cooldown; try later', Math.ceil((this.cooldownUntil - Date.now()) / 1000));
-      const wait = Math.max(0, this.nextStart - Date.now());
-      if (wait) await delay(wait, undefined, { signal });
-      signal.throwIfAborted();
-      this.nextStart = Date.now() + 1000;
-    } catch (error) { this.release(); throw error; }
-  }
-
-  private release() {
-    const next = this.waiting.shift();
-    if (next) next(); else this.active = false;
   }
 
   private async request<T extends object>(path: string, params: Record<string, string>, schema: z.ZodType<T>,
@@ -190,23 +158,28 @@ export class SemanticScholarProvider {
     }
     if (this.options.offline) throw new SemanticScholarError(503, 'Offline: Semantic Scholar response is not cached');
     return this.options.cache.deduplicate(key, async sharedSignal => {
-      const deadline = AbortSignal.any([sharedSignal, AbortSignal.timeout(Math.min(12000, this.options.timeoutMs ?? 12000))]);
-      let acquired = false;
+      const timeoutMs = Math.min(12000, this.options.timeoutMs ?? 12000);
+      const deadlineAt = Date.now() + timeoutMs;
+      const deadline = AbortSignal.any([sharedSignal, AbortSignal.timeout(timeoutMs)]);
+      let reservation: SemanticRateReservation | undefined;
+      let retryAfter: number | undefined;
+      let terminalNotFound = false;
       try {
-        await this.slot(deadline); acquired = true;
+        const limiter = this.rateLimiter ??= this.options.rateLimiter ?? createSemanticRateLimiter(this.options);
+        reservation = await limiter.reserve(deadline);
+        reservation.assertValid();
         const response = await (this.options.fetch ?? fetch)(url, { method: ids ? 'POST' : 'GET', body,
           redirect: 'error', signal: deadline, headers: { Accept: 'application/json',
             ...(ids ? { 'Content-Type': 'application/json' } : {}),
             ...(this.options.apiKey ? { 'x-api-key': this.options.apiKey } : {}) } });
         if (!response.ok) {
-          let retryAfter: number | undefined;
-          if (response.status === 429) {
-            const header = response.headers.get('retry-after');
-            const seconds = header && /^\d+(?:\.\d+)?$/.test(header) ? Number(header) : header ? (Date.parse(header) - Date.now()) / 1000 : 0;
-            retryAfter = Math.ceil(Math.max(60, Number.isFinite(seconds) ? seconds : 0));
-            this.cooldownUntil = Date.now() + retryAfter * 1000;
-          }
-          await response.body?.cancel();
+          try {
+            if (response.status === 429) {
+              retryAfter = semanticRetryAfter(response.headers.get('retry-after'));
+              // Persist before body cancellation can exhaust the provider's deadline.
+              await reservation.cooldown?.(retryAfter, deadline);
+            }
+          } finally { await response.body?.cancel(); }
           throw new SemanticScholarError(response.status === 404 ? 404 : response.status === 429 ? 429 : 503,
             response.status === 429 ? 'Semantic Scholar rate limited; wait before trying again' : 'Semantic Scholar is unavailable', retryAfter);
         }
@@ -240,9 +213,19 @@ export class SemanticScholarProvider {
         return result.data;
       } catch (error) {
         if (sharedSignal.aborted) throw sharedSignal.reason;
-        if (error instanceof SemanticScholarError) throw error;
+        if (error instanceof SemanticRateLimitError) throw new SemanticScholarError(error.status, error.message, error.retryAfter);
+        if (error instanceof SemanticScholarError) { terminalNotFound = error.status === 404; throw error; }
         throw new SemanticScholarError(503);
-      } finally { if (acquired) this.release(); }
+      } finally {
+        if (reservation) {
+          try { await reservation.release(retryAfter, AbortSignal.timeout(Math.max(1, deadlineAt - Date.now()))); }
+          catch {
+            if (sharedSignal.aborted) throw sharedSignal.reason;
+            // Cleanup must not turn a genuine missing paper into stale-cache fallback.
+            if (!terminalNotFound) throw new SemanticScholarError(503, 'Semantic Scholar shared rate gate is unavailable');
+          }
+        }
+      }
     }, signal);
   }
 

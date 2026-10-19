@@ -67,12 +67,38 @@ Set these as server environment variables. See [`.env.example`](.env.example).
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PAPERS_API_KEY` | unset | Optional key for a larger metadata API quota |
-| `S2_API_KEY` | unset | Enables Semantic Scholar search |
+| `S2_API_KEY` | unset | Enables Semantic Scholar search and validated sparse-graph fallback |
 | `OFFLINE` | `0` | `1` disables all provider requests |
 | `PORT` | `3001` | Backend port |
 | `HOST` | `127.0.0.1` | Use `0.0.0.0` behind a container or proxy |
 
 Never expose API keys through `VITE_*` variables.
+
+### Graph Data Fallback
+
+OpenAlex remains the default search and graph source. Automatic graph requests with
+three or fewer displayed papers, no edges, or eligible provider failures can resolve
+the same publication in Semantic Scholar. A fallback requires a unique verified
+DOI, arXiv, or title/year/author match and improved connection coverage. More papers
+are not proof of better relevance, and provider IDs are not mixed in one graph.
+
+The graph labels its actual source and fallback reason. Shared links use canonical
+Semantic Scholar IDs for S2 results. Explicit API requests with
+`provider=openalex` stay OpenAlex-only for comparison. Persistent expansion jobs
+remain OpenAlex-based and cannot overwrite a displayed S2 fallback.
+
+Partial reference neighborhoods remain usable when optional citation/hydration
+requests fail. Coverage text identifies missing data, and partial caches expire
+so later requests can attempt a fuller neighborhood.
+
+Semantic Scholar keys are sent only through the server-side `x-api-key` header.
+All endpoints share a key-based limiter: one active request, at least 1,250 ms
+after completion, and shared `Retry-After` cooldowns. On Vercel, Supabase's private
+`semantic_api_budget` table coordinates instances. Apply migrations with
+`make migrate` before enabling this mode. The table contains a key hash, not the key.
+
+S2 data/API terms are separate from the application's MIT license. No S2 corpus
+or temporary research capture is bundled with this repository.
 
 ## Development
 

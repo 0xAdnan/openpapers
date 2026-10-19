@@ -36,6 +36,7 @@ const graphPaper = PaperSchema.extend({
   similarity: z.number().min(0).max(1), sharedReferences: count, coCitations: count,
   graphConnections: count, isOrigin: z.boolean(),
 });
+const graphCoverage = z.object({ nodes: count, edges: count, connectedOrigins: count, candidates: count });
 export const GraphResponseSchema = z.object({
   origins: z.array(id).min(1).max(3), nodes: z.array(graphPaper).min(1).max(40),
   edges: z.array(z.object({ source: id, target: id, weight: z.number().min(0).max(1), sharedReferences: count, coCitations: count, directCitation: z.literal(true).optional() })).max(780),
@@ -43,10 +44,19 @@ export const GraphResponseSchema = z.object({
   meta: meta.extend({ candidateCount: count.max(50000), algorithm: z.string(), coverage: z.string(),
     candidateBudget: count.max(50000).optional(), referenceCount: count.max(2000000).optional(),
     jobId: z.string().uuid().optional(), acquisitionStop: z.string().optional(),
+    fallback: z.object({ from: z.literal('openalex'), requestedOrigins: z.array(z.string().regex(/^W[1-9]\d{0,14}$/)).min(1).max(3),
+      resolvedOrigins: z.array(z.string().regex(/^S2:[a-f0-9]{40}$/)).min(1).max(3),
+      reason: z.enum(['limited_connections', 'openalex_unavailable']),
+      comparison: z.object({ openalex: graphCoverage.nullable(), semanticScholar: graphCoverage }),
+    }).optional(),
   }),
 }).refine(graph => {
   const nodes = new Set(graph.nodes.map(paper => paper.id));
   return nodes.size === graph.nodes.length && new Set(graph.origins).size === graph.origins.length &&
+    (!graph.meta.fallback || (graph.meta.provider === 'semantic-scholar' &&
+      graph.meta.fallback.requestedOrigins.length === graph.meta.fallback.resolvedOrigins.length &&
+      new Set(graph.meta.fallback.requestedOrigins).size === graph.meta.fallback.requestedOrigins.length &&
+      graph.meta.fallback.resolvedOrigins.join(',') === graph.origins.join(','))) &&
     graph.origins.every(origin => graph.nodes.some(paper => paper.id === origin && paper.isOrigin)) &&
     graph.nodes.every(paper => paper.isOrigin === graph.origins.includes(paper.id)) &&
     graph.edges.every(edge => nodes.has(edge.source) && nodes.has(edge.target) && edge.source !== edge.target && (edge.directCitation

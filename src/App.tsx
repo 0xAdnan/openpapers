@@ -234,7 +234,7 @@ function Home() {
 
 function DataBadge({ meta }: { meta: DataMeta }) {
   const date = new Date(meta.fetchedAt);
-  return <span className="data-badge" title={meta.warning ?? `Data fetched ${meta.fetchedAt}`}><span className="status-dot" />{meta.source === 'live' ? 'Live data' : meta.source === 'snapshot' ? 'Snapshot' : 'Cached data'}<span>· {Number.isNaN(date.getTime()) ? 'Date unavailable' : date.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}</span></span>;
+  return <span className="data-badge" title={meta.warning ?? `Data fetched ${meta.fetchedAt}`}><span className="status-dot" />{meta.provider && `${meta.provider === 'semantic-scholar' ? 'Semantic Scholar' : 'OpenAlex'} · `}{meta.source === 'live' ? 'Live data' : meta.source === 'snapshot' ? 'Snapshot' : 'Cached data'}<span>· {Number.isNaN(date.getTime()) ? 'Date unavailable' : date.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}</span></span>;
 }
 
 function ErrorState({ error }: { error: string }) {
@@ -307,13 +307,16 @@ function Dialog({ title, children, onClose }: { title: string; children: ReactNo
 
 function Workspace() {
   const { ids = '', view = 'graph' } = useParams();
-  const origins = ids.split(',');
+  const requestedOrigins = ids.split(',');
   const currentView = ['graph', 'list', 'prior', 'derivative'].includes(view) ? view : 'graph';
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const { data: quickData, loading, error } = useApi<GraphResponse>(`/api/graph?ids=${encodeURIComponent(ids)}${params.has('provider') ? `&provider=${encodeURIComponent(params.get('provider')!)}` : ''}`);
-  const expansion = useGraphJob(origins);
-  const data = expansion.result ?? quickData;
+  const expansionEnabled = !quickData?.meta.fallback && requestedOrigins.every(id => paperProvider(id) === 'openalex');
+  const expansion = useGraphJob(requestedOrigins, expansionEnabled);
+  const data = quickData?.meta.fallback ? quickData : expansion.result ?? quickData;
+  const graphOrigins = data?.origins ?? requestedOrigins;
+  const fallback = data?.meta.fallback;
   const job = expansion.job;
   const [mobilePane, setMobilePane] = useState<'graph' | 'papers' | 'details'>('graph');
   const [dialog, setDialog] = useState<'filters' | 'export' | 'data' | 'expand' | 'share' | null>(null);
@@ -322,7 +325,10 @@ function Workspace() {
   useEffect(() => { setMobilePane('graph'); setHoveredId(null); }, [ids, view]);
   useEffect(() => { setDialog(null); }, [ids]);
   const all = data ? [...data.nodes, ...data.prior, ...data.derivative] : [];
-  const selected = all.find(p => p.id === params.get('selected')) ?? data?.nodes[0];
+  const requestedSelected = params.get('selected');
+  const originIndex = fallback?.requestedOrigins.indexOf(requestedSelected ?? '') ?? -1;
+  const selectedId = originIndex >= 0 ? fallback?.resolvedOrigins[originIndex] : requestedSelected;
+  const selected = all.find(p => p.id === selectedId) ?? data?.nodes[0];
   const detailPaper = all.find(p => p.id === hoveredId) ?? selected;
   const keyword = params.get('keyword')?.toLowerCase() ?? '';
   const min = Number(params.get('from')) || 0, max = Number(params.get('to')) || 9999;
@@ -336,15 +342,18 @@ function Workspace() {
     if (detail) setMobilePane('details');
   }
   function open(id: string) { navigate(graphUrl([id])); }
-  const shareUrl = data ? graphShareLink(window.location.origin, origins, currentView, params) : '';
+  const shareParams = new URLSearchParams(params);
+  if (selected && requestedSelected) shareParams.set('selected', selected.id);
+  if (graphOrigins.some(id => paperProvider(id) === 'semantic-scholar')) shareParams.delete('job');
+  const shareUrl = data ? graphShareLink(window.location.origin, graphOrigins, currentView, shareParams) : '';
   return <main id="main" className="workspace">
     <div className="workspace-toolbar"><Link to="/" className="workspace-back" aria-label="Back to search"><ArrowLeft size={18} /></Link><h1 title={data?.nodes.filter(p => p.isOrigin).map(p => p.title).join(' + ')}>{data?.nodes.filter(p => p.isOrigin).map(p => p.title).join(' + ') || 'Research graph'}</h1><nav className="view-tabs" aria-label="Graph views">
-      <Link className={currentView === 'graph' ? 'active' : ''} to={`${graphUrl(origins)}?${params}`}><Network size={17} /><span>Graph</span></Link>
-      <Link className={currentView === 'prior' ? 'active' : ''} to={`${graphUrl(origins, 'prior')}?${params}`}><GitBranch size={17} /><span>Prior<span className="desktop-word"> works</span></span></Link>
-      <Link className={currentView === 'derivative' ? 'active' : ''} to={`${graphUrl(origins, 'derivative')}?${params}`}><Plus size={17} /><span>Derivative<span className="desktop-word"> works</span></span></Link>
-      <Link className={currentView === 'list' ? 'active' : ''} to={`${graphUrl(origins, 'list')}?${params}`}><List size={17} /><span>List<span className="desktop-word"> view</span></span></Link>
+      <Link className={currentView === 'graph' ? 'active' : ''} to={`${graphUrl(requestedOrigins)}?${params}`}><Network size={17} /><span>Graph</span></Link>
+      <Link className={currentView === 'prior' ? 'active' : ''} to={`${graphUrl(requestedOrigins, 'prior')}?${params}`}><GitBranch size={17} /><span>Prior<span className="desktop-word"> works</span></span></Link>
+      <Link className={currentView === 'derivative' ? 'active' : ''} to={`${graphUrl(requestedOrigins, 'derivative')}?${params}`}><Plus size={17} /><span>Derivative<span className="desktop-word"> works</span></span></Link>
+      <Link className={currentView === 'list' ? 'active' : ''} to={`${graphUrl(requestedOrigins, 'list')}?${params}`}><List size={17} /><span>List<span className="desktop-word"> view</span></span></Link>
     </nav><div className="workspace-actions"><button className={filterCount ? 'active' : ''} onClick={() => setDialog('filters')} aria-label="Filter papers"><SlidersHorizontal size={18} /><span>Filters{filterCount ? ` (${filterCount})` : ''}</span></button><button className="graph-share-trigger" onClick={() => setDialog('share')} disabled={!data} aria-label="Share graph"><Share2 size={18} /><span>Share</span></button><button onClick={() => setDialog('export')} aria-label="Export graph"><Download size={18} /></button></div></div>
-    {(expansion.available || expansion.id || expansion.creating || expansion.error) && <section className={`jobs-banner ${expansion.error || job?.state === 'failed' ? 'jobs-error' : ''}`} aria-label="Research expansion">
+    {expansionEnabled && (expansion.available || expansion.id || expansion.creating || expansion.error) && <section className={`jobs-banner ${expansion.error || job?.state === 'failed' ? 'jobs-error' : ''}`} aria-label="Research expansion">
       <div className="jobs-content" role="status" aria-live="polite">
         <strong>{expansion.creating ? 'Starting research expansion...' : !expansion.watching ? 'Research updates hidden' : job ? ({ queued: 'Research expansion queued', running: job.phase === 'acquire' ? 'Acquiring research candidates' : job.phase === 'score' ? 'Scoring acquired candidates' : 'Publishing research graph', paused: 'Research expansion paused', completed: 'Research expansion complete', failed: 'Research expansion failed' }[job.state]) : expansion.id ? 'Resuming research expansion...' : 'Quick graph coverage'}</strong>
         {job ? <>
@@ -366,20 +375,24 @@ function Workspace() {
       </div>
     </section>}
     {loading && !data ? <Loading graph /> : error && !data ? <ErrorState error={error} /> : data && selected && detailPaper && <>
+      {fallback && <section className="jobs-banner" aria-label="Graph data fallback">
+        <div className="jobs-content" role="status" aria-live="polite"><strong>{fallback.reason === 'openalex_unavailable' ? 'Showing Semantic Scholar: OpenAlex was unavailable.' : 'Showing Semantic Scholar: OpenAlex had limited connection data.'}</strong><p>{fallback.comparison.openalex ? `OpenAlex: ${exactNumber.format(fallback.comparison.openalex.nodes)} ${fallback.comparison.openalex.nodes === 1 ? 'paper' : 'papers'}, ${exactNumber.format(fallback.comparison.openalex.edges)} ${fallback.comparison.openalex.edges === 1 ? 'edge' : 'edges'}.` : 'OpenAlex: unavailable.'} {`Semantic Scholar: ${exactNumber.format(fallback.comparison.semanticScholar.nodes)} ${fallback.comparison.semanticScholar.nodes === 1 ? 'paper' : 'papers'}, ${exactNumber.format(fallback.comparison.semanticScholar.edges)} ${fallback.comparison.semanticScholar.edges === 1 ? 'edge' : 'edges'}.`}</p></div>
+        <div className="jobs-actions"><Link className="secondary small" to={shareUrl}>Open canonical graph <ArrowRight size={15} /></Link></div>
+      </section>}
       {data.meta.warning?.includes('Data integrity warning:') && <button className="integrity-notice" onClick={() => setDialog('data')}><Info size={16} /><span>Source metadata conflicts with the seed publication. Review before citing.</span><span className="integrity-more">Details <ChevronRight size={14} /></span></button>}
       <div className="mobile-pane-tabs" role="group" aria-label="Workspace panels"><button className={mobilePane === 'graph' ? 'active' : ''} onClick={() => setMobilePane('graph')}>{currentView === 'graph' ? <Network size={17} /> : <List size={17} />}{currentView === 'graph' ? 'Graph' : 'Results'}</button><button className={mobilePane === 'papers' ? 'active' : ''} onClick={() => setMobilePane('papers')}><Library size={17} />Papers ({filtered.length})</button><button className={mobilePane === 'details' ? 'active' : ''} onClick={() => setMobilePane('details')}><Info size={17} />Details</button></div>
       <div className={`workspace-panels pane-${mobilePane} view-${currentView}`}>
         <aside className="paper-sidebar" aria-label="Graph papers"><div className="panel-heading"><h2>Graph papers</h2><span>{filtered.length}</span></div><div className="paper-sidebar-list">{filtered.map(paper => <button key={paper.id} className={`sidebar-paper ${selected.id === paper.id ? 'selected' : ''} ${paper.isOrigin ? 'origin-paper' : ''}`} onClick={() => select(paper.id, mobilePane === 'papers')}>
-          {paper.isOrigin && <span className="origin-label"><span />Origin paper</span>}<strong>{paper.title}</strong><span className="sidebar-meta"><span>{paper.authors[0] || 'Unknown author'}{paper.authors.length > 1 ? ' et al.' : ''}</span><span>{paper.year ?? 'n.d.'}</span></span>{!paper.isOrigin && <span className="sidebar-score">{paper.similarity > 0 ? `${(paper.similarity * 100).toFixed(1)}% similarity` : data.nodes.some(origin => origins.includes(origin.id) && (paper.references.includes(origin.id) || origin.references.includes(paper.id))) ? 'Direct citation' : 'No measured origin similarity'}</span>}
+          {paper.isOrigin && <span className="origin-label"><span />Origin paper</span>}<strong>{paper.title}</strong><span className="sidebar-meta"><span>{paper.authors[0] || 'Unknown author'}{paper.authors.length > 1 ? ' et al.' : ''}</span><span>{paper.year ?? 'n.d.'}</span></span>{!paper.isOrigin && <span className="sidebar-score">{paper.similarity > 0 ? `${(paper.similarity * 100).toFixed(1)}% similarity` : data.nodes.some(origin => graphOrigins.includes(origin.id) && (paper.references.includes(origin.id) || origin.references.includes(paper.id))) ? 'Direct citation' : 'No measured origin similarity'}</span>}
         </button>)}</div></aside>
         <section className="graph-main" aria-label={currentView === 'graph' ? 'Similarity graph' : 'Related papers'}>
           {currentView === 'graph' ? <><div className="graph-summary"><span><strong>{filtered.length}</strong> papers <span className="summary-divider">/</span> {edges.length} connections</span><button onClick={() => setDialog('data')}><DataBadge meta={data.meta} /><Info size={14} /></button></div><GraphCanvas nodes={filtered} edges={edges} selectedId={selected.id} onHover={setHoveredId} onSelect={id => select(id)} onOpen={open} /><button className="mobile-selection" onClick={() => setMobilePane('details')}><span><small>Selected paper</small><strong>{selected.title}</strong></span><ChevronRight size={20} /></button></> : <PaperTable papers={(currentView === 'prior' ? data.prior : currentView === 'derivative' ? data.derivative : data.nodes).filter(p => p.isOrigin || filter(p))} selected={selected.id} onSelect={id => select(id, true)} kind={currentView} />}
         </section>
-        <aside className="detail-sidebar" aria-label="Selected paper details"><PaperDetails paper={detailPaper} origins={origins} onAdd={() => { if (origins.some(id => paperProvider(id) !== paperProvider(detailPaper.id))) notify('Combined graph origins must use the same data source. Your origins are unchanged.'); else if (origins.length >= 3) notify('A graph can have up to 3 origin papers.'); else if (!origins.includes(detailPaper.id)) navigate(graphUrl([...origins, detailPaper.id])); }} /></aside>
+        <aside className="detail-sidebar" aria-label="Selected paper details"><PaperDetails paper={detailPaper} origins={graphOrigins} onAdd={() => { if (graphOrigins.some(id => paperProvider(id) !== paperProvider(detailPaper.id))) notify('Combined graph origins must use the same data source. Your origins are unchanged.'); else if (graphOrigins.length >= 3) notify('A graph can have up to 3 origin papers.'); else if (!graphOrigins.includes(detailPaper.id)) { const next = new URLSearchParams(shareParams); next.set('selected', detailPaper.id); next.delete('job'); const url = new URL(graphShareLink(window.location.origin, [...graphOrigins, detailPaper.id], 'graph', next)); navigate(url.pathname + url.search); } }} /></aside>
       </div>
       <div className="workspace-status"><span><span className="status-dot" />{data.meta.candidateCount} papers compared</span><button onClick={() => setDialog('data')}>Data & coverage <Info size={13} /></button></div>
     </>}
-    {dialog === 'share' && data && <Dialog title="Share graph" onClose={() => setDialog(null)}><GraphShare key={shareUrl} url={shareUrl} title={data.nodes.filter(paper => paper.isOrigin).map(paper => paper.title).join(' + ')} expanded={params.has('job')} /></Dialog>}
+    {dialog === 'share' && data && <Dialog title="Share graph" onClose={() => setDialog(null)}><GraphShare key={shareUrl} url={shareUrl} title={data.nodes.filter(paper => paper.isOrigin).map(paper => paper.title).join(' + ')} expanded={shareParams.has('job')} /></Dialog>}
     {dialog === 'expand' && expansion.config && <Dialog title="Expand research" onClose={() => setDialog(null)}><form onSubmit={async event => { event.preventDefault(); const target = Number(new FormData(event.currentTarget).get('candidateBudget')); if (await expansion.start(target)) setDialog(null); }}>
       <p className="dialog-copy">Start a durable acquisition job for these origin papers. Your quick graph remains usable until a completed result is ready. The display stays at up to 40 papers.</p>
       <label className="field-label jobs-target">Candidate target<select name="candidateBudget" defaultValue={Math.min(5000, expansion.config.candidateBudget)} disabled={expansion.creating}>{[...new Set([1000, 5000, 10000, 50000, expansion.config.candidateBudget])].sort((a, b) => a - b).filter(target => target <= expansion.config!.candidateBudget).map(target => <option key={target} value={target}>{exactNumber.format(target)} candidates</option>)}</select></label>

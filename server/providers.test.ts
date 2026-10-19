@@ -191,19 +191,44 @@ test('OpenAlex search resolves DOI, arXiv and PubMed links to exact identifier f
     seen.push(new URL(String(input)));
     return Response.json({ meta: { count: 0, page: 1, per_page: 20 }, results: [] });
   } });
-  const cases: [string, Record<string, string>][] = [
-    ['https://doi.org/10.1002/asi.21525', { filter: 'doi:https://doi.org/10.1002/asi.21525' }],
-    ['https://arxiv.org/abs/1706.03762v7', { filter: 'doi:https://doi.org/10.48550/arxiv.1706.03762' }],
-    ['arxiv.org/pdf/2101.00001.pdf', { filter: 'doi:https://doi.org/10.48550/arxiv.2101.00001' }],
-    ['arXiv:2203.02155', { filter: 'doi:https://doi.org/10.48550/arxiv.2203.02155' }],
-    ['https://pubmed.ncbi.nlm.nih.gov/23287718/', { filter: 'ids.pmid:23287718' }],
-    ['PMID: 12345678', { filter: 'ids.pmid:12345678' }],
-    ['science mapping software tools', { search: 'science mapping software tools' }],
+  const arxiv = (id: string) => [`doi:https://doi.org/10.48550/arxiv.${id}`,
+    `locations.landing_page_url:https://arxiv.org/abs/${id}|http://arxiv.org/abs/${id}`];
+  const cases: [string, Record<string, string>[]][] = [
+    ['https://doi.org/10.1002/asi.21525', [{ filter: 'doi:https://doi.org/10.1002/asi.21525' }]],
+    ['https://arxiv.org/abs/1706.03762v7', arxiv('1706.03762').map(filter => ({ filter }))],
+    ['arxiv.org/pdf/2101.00001.pdf', arxiv('2101.00001').map(filter => ({ filter }))],
+    ['arXiv:2203.02155', arxiv('2203.02155').map(filter => ({ filter }))],
+    ['2609.31142', arxiv('2609.31142').map(filter => ({ filter }))],
+    ['https://doi.org/10.48550/arXiv.2401.00002', arxiv('2401.00002').map(filter => ({ filter }))],
+    ['https://pubmed.ncbi.nlm.nih.gov/23287718/', [{ filter: 'ids.pmid:23287718' }]],
+    ['PMID: 12345678', [{ filter: 'ids.pmid:12345678' }]],
+    ['science mapping software tools', [{ search: 'science mapping software tools' }]],
   ];
-  for (const [query, expected] of cases) {
+  for (const [query, requests] of cases) {
+    seen.length = 0;
     await provider.search(query, 1);
-    const url = seen.at(-1)!;
-    for (const [key, value] of Object.entries(expected)) assert.equal(url.searchParams.get(key), value, query);
-    assert.equal(url.searchParams.has(expected.filter ? 'search' : 'filter'), false, query);
+    assert.equal(seen.length, requests.length, query);
+    for (const [index, expected] of requests.entries()) {
+      for (const [key, value] of Object.entries(expected)) assert.equal(seen[index].searchParams.get(key), value, query);
+      assert.equal(seen[index].searchParams.has(expected.filter ? 'search' : 'filter'), false, query);
+    }
   }
+});
+
+test('OpenAlex arXiv search only falls back to the landing page when the DOI is not linked yet', async t => {
+  const { cache } = await setup(t);
+  const filters: string[] = [];
+  const provider = new OpenAlexProvider({ cache, fetch: async input => {
+    const filter = new URL(String(input)).searchParams.get('filter')!;
+    filters.push(filter);
+    const results = filter === 'doi:https://doi.org/10.48550/arxiv.1706.03762' || filter.startsWith('locations.landing_page_url:https://arxiv.org/abs/2609.31142')
+      ? [{ id: `https://openalex.org/W${filters.length}`, display_name: 'arXiv fixture' }] : [];
+    return Response.json({ meta: { count: results.length, page: 1, per_page: 20 }, results });
+  } });
+  assert.equal((await provider.search('https://arxiv.org/abs/1706.03762', 1)).results.length, 1);
+  assert.deepEqual(filters, ['doi:https://doi.org/10.48550/arxiv.1706.03762']);
+  filters.length = 0;
+  assert.equal((await provider.search('https://arxiv.org/abs/2609.31142', 1)).results.length, 1);
+  assert.deepEqual(filters, ['doi:https://doi.org/10.48550/arxiv.2609.31142',
+    'locations.landing_page_url:https://arxiv.org/abs/2609.31142|http://arxiv.org/abs/2609.31142']);
 });

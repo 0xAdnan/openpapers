@@ -12,6 +12,7 @@ import type { GraphJobStore } from './graph-store.ts';
 import { z } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
 import { OpenAlexProvider } from './openalex.ts';
+import { GraphFallbackCoordinator } from './graph-fallback.ts';
 
 export function createApp(options: { service?: PaperService; semanticService?: SemanticService; defaultProvider?: ProviderId; offline?: boolean; rateLimit?: number; distPath?: string; requestTimeoutMs?: number; cacheDirectory?: string; snapshotPath?: string; maxResponseBytes?: number; jobStore?: GraphJobStore; jobRunner?: GraphJobRunner; background?: (task: Promise<unknown>) => void } = {}) {
   const offline = options.offline ?? /^(1|true)$/i.test(process.env.OFFLINE ?? '');
@@ -27,6 +28,7 @@ export function createApp(options: { service?: PaperService; semanticService?: S
   const configuredProvider = options.defaultProvider ?? process.env.DEFAULT_PROVIDER ?? 'openalex';
   if (configuredProvider !== 'openalex' && configuredProvider !== 'semantic-scholar') throw new Error('DEFAULT_PROVIDER must be openalex or semantic-scholar');
   const semanticSearchEnabled = Boolean(process.env.S2_API_KEY);
+  const graphFallback = new GraphFallbackCoordinator(service, semanticService, semanticSearchEnabled && !offline);
   const defaultProvider: ProviderId = configuredProvider === 'semantic-scholar' && !semanticSearchEnabled ? 'openalex' : configuredProvider;
   const app = express();
   app.disable('x-powered-by');
@@ -180,8 +182,9 @@ export function createApp(options: { service?: PaperService; semanticService?: S
     const selected = paperProvider(ids[0]);
     if (ids.some(id => paperProvider(id) !== selected)) throw new ApiError(400, 'Combined graph origins must use the same provider; cross-provider identities have not been reconciled');
     if (selector(req.query.provider, selected) !== selected) throw new ApiError(400, 'Provider does not match the graph paper IDs');
-    const response = await (selected === 'semantic-scholar' ? semanticService : service).graph(ids, signal);
-    if (!res.writableEnded && !res.destroyed) res.json({ ...response, meta: { ...response.meta, provider: selected } });
+    const response = await (selected === 'semantic-scholar' ? semanticService.graph(ids, signal)
+      : req.query.provider === undefined ? graphFallback.graph(ids, signal) : service.graph(ids, signal));
+    if (!res.writableEnded && !res.destroyed) res.json({ ...response, meta: { ...response.meta, provider: response.meta.provider ?? selected } });
   }));
   app.get('/api/paper/:id', route(async (req, res, signal) => {
     const id = scalar(req.params.id, 'paper ID', 43);

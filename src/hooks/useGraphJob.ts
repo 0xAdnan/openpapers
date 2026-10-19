@@ -60,7 +60,7 @@ function parseJob(body: unknown, key: string, id?: string): GraphJob {
 
 type JobState = { key: string; id: string | null; job?: GraphJob; error?: string; creating?: boolean };
 
-export default function useGraphJob(origins: string[]) {
+export default function useGraphJob(origins: string[], enabled = true) {
   const key = [...origins].sort().join(',');
   const [params, setParams] = useSearchParams();
   const id = params.get('job');
@@ -72,8 +72,8 @@ export default function useGraphJob(origins: string[]) {
   const previousRoute = useRef({ key, id });
   const [watching, setWatching] = useState(true);
   const [retry, setRetry] = useState(0);
-  const current = state.key === key && state.id === id ? state : { key, id };
-  const available = Boolean(config?.available && origins.length >= 1 && origins.length <= 3 && new Set(origins).size === origins.length && origins.every(origin => /^W[1-9]\d{0,14}$/.test(origin)));
+  const current = enabled && state.key === key && state.id === id ? state : { key, id };
+  const available = Boolean(enabled && config?.available && origins.length >= 1 && origins.length <= 3 && new Set(origins).size === origins.length && origins.every(origin => /^W[1-9]\d{0,14}$/.test(origin)));
 
   const updateId = useEffectEvent((nextId: string | null) => {
     const next = new URLSearchParams(window.location.search);
@@ -82,20 +82,22 @@ export default function useGraphJob(origins: string[]) {
   });
 
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
     configRequest.current ??= requestJson('/api/graph-jobs/config', new AbortController().signal).then(body => ConfigSchema.parse(body));
     configRequest.current.then(value => { if (active) setConfig(value); }).catch(() => {});
     return () => { active = false; };
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
     setWatching(true);
     return () => { submission.current?.abort(); submission.current = null; };
-  }, [key, id]);
+  }, [key, id, enabled]);
 
   useEffect(() => {
     const carriedJob = previousRoute.current.key !== key && previousRoute.current.id === id;
     previousRoute.current = { key, id };
+    if (!enabled) return;
     if (carriedJob && id) { accepted.current = { key, id: null }; updateId(null); return; }
     if (!id || !watching) return;
     if (!GraphJobSchema.shape.id.safeParse(id).success) {
@@ -129,7 +131,7 @@ export default function useGraphJob(origins: string[]) {
       if (seed.state !== 'completed' && seed.state !== 'failed') timer = setTimeout(poll, delay(seed));
     } else void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [key, id, watching, retry]);
+  }, [key, id, watching, retry, enabled]);
 
   async function start(candidateBudget: number) {
     if (!available || !config || id || submission.current) return false;
@@ -163,7 +165,7 @@ export default function useGraphJob(origins: string[]) {
   }
 
   return {
-    config, available, id, job: current.job, error: current.error, creating: Boolean(current.creating), watching,
+    config: enabled ? config : undefined, available, id, job: current.job, error: current.error, creating: Boolean(current.creating), watching: enabled && watching,
     result: current.job?.state === 'completed' ? current.job.result : null,
     start, forget, stopWatching: () => setWatching(false),
     resume: () => { setWatching(true); setRetry(value => value + 1); },

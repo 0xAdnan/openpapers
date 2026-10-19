@@ -55,6 +55,16 @@ export interface GraphResponse {
     referenceCount?: number;
     jobId?: string;
     acquisitionStop?: string;
+    fallback?: {
+      from: 'openalex';
+      requestedOrigins: string[];
+      resolvedOrigins: string[];
+      reason: 'limited_connections' | 'openalex_unavailable';
+      comparison: {
+        openalex: { nodes: number; edges: number; connectedOrigins: number; candidates: number } | null;
+        semanticScholar: { nodes: number; edges: number; connectedOrigins: number; candidates: number };
+      };
+    };
   };
 }
 

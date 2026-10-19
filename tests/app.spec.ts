@@ -440,7 +440,7 @@ test('OpenAlex-only configuration hides source selectors and resets legacy searc
   await page.locator('.example-card').first().click();
   await expect(nodes(page)).toHaveCount(40);
   await expect(page.locator('select')).toHaveCount(0);
-  await expect(page.locator('.data-badge')).toContainText(/^(Live data|Snapshot|Cached data)·/);
+  await expect(page.locator('.data-badge')).toContainText(/^OpenAlex · (Live data|Snapshot|Cached data)·/);
   await expect(details(page).getByRole('link', { name: /^Source record for / })).toHaveAttribute('href', `https://openalex.org/${featuredPreviews[0].id}`);
   expect(diagnostics.searchRequests.length).toBeGreaterThan(0);
   expect(diagnostics.searchRequests.every(url => new URL(url, page.url()).searchParams.get('provider') === 'openalex')).toBe(true);

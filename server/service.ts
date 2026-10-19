@@ -33,7 +33,7 @@ interface Snapshot {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public code?: 'origin_not_found' | 'neighborhood_unavailable') { super(message); }
 }
 
 export function localSearch(papers: Paper[], q: string, page: number, meta: DataMeta): SearchResponse {
@@ -256,7 +256,10 @@ export class PaperService {
           continue;
         }
         if (!this.offline) try {
-          const origin = await this.provider.getPaper(id, operationSignal);
+          const origin = await this.provider.getPaper(id, operationSignal).catch(error => {
+            if (error instanceof ProviderError && error.status === 404) throw new ApiError(404, `Paper ${id} not found`, 'origin_not_found');
+            throw error;
+          });
           const group = await collectCandidates(this.provider, origin, operationSignal);
           operationSignal.throwIfAborted();
           groups.push(group);
@@ -272,7 +275,8 @@ export class PaperService {
           continue;
         } catch (error) {
           operationSignal.throwIfAborted();
-          if (error instanceof ProviderError && error.status === 404) throw new ApiError(404, `Paper ${id} not found`);
+          if (error instanceof ApiError) throw error;
+          if (error instanceof ProviderError && error.status === 404) throw new ApiError(404, `Graph connections for paper ${id} are unavailable`, 'neighborhood_unavailable');
           const stale = await this.cached(key, GraphResponseSchema, true);
           if (stale && stale.value.origins.join(',') === origins.join(',')) return { ...stale.value, meta: this.integrityMeta({ ...stale.value.meta, source: 'cache', warning: [stale.value.meta.warning, 'The paper data service is unavailable; returning a cached graph.'].filter(Boolean).join(' ') }, [...stale.value.nodes, ...stale.value.prior, ...stale.value.derivative]) };
         }

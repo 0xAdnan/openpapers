@@ -10,7 +10,8 @@ import { normalizeSemanticPaper, S2_LICENSE_WARNING, S2_SEARCH_WARNING, semantic
 
 const s2Papers = (papers: Paper[]) => papers.every(p => S2_ID_PATTERN.test(p.id) && p.references.every(id => S2_ID_PATTERN.test(id)));
 const s2Meta = (meta: DataMeta) => meta.provider === 'semantic-scholar' && meta.source !== 'snapshot';
-const PoolSchema = CandidatePoolSchema.refine(p => p.provider === 'semantic-scholar' && S2_ID_PATTERN.test(p.origin) && s2Papers(p.papers));
+const PoolSchema = CandidatePoolSchema.safeExtend({ warning: z.string().optional() })
+  .refine(p => p.provider === 'semantic-scholar' && S2_ID_PATTERN.test(p.origin) && s2Papers(p.papers));
 const SearchSchema = SearchResponseSchema.refine(r => s2Meta(r.meta) && s2Papers(r.results) && r.page <= 50);
 const PaperSchema = PaperResponseSchema.refine(r => s2Meta(r.meta) && s2Papers([r.paper]));
 const GraphSchema = GraphResponseSchema.refine(r => s2Meta(r.meta) && r.origins.every(id => S2_ID_PATTERN.test(id)) &&
@@ -59,7 +60,7 @@ export class SemanticService {
     this.pools.delete(pool.origin); this.pools.set(pool.origin, { pool, expiresAt });
     while (this.pools.size > 12) this.pools.delete(this.pools.keys().next().value!);
     this.remember(pool.papers, { provider: 'semantic-scholar', source: 'cache', fetchedAt: pool.fetchedAt,
-      warning: joinWarnings(pool.coverage, S2_LICENSE_WARNING) }, expiresAt);
+      warning: joinWarnings(pool.warning, S2_LICENSE_WARNING) }, expiresAt);
   }
 
   private async cached<T>(key: string, schema: z.ZodType<T>, stale = false) {
@@ -69,7 +70,8 @@ export class SemanticService {
   }
 
   private metadata(meta: DataMeta, warning?: string): DataMeta {
-    return { ...meta, provider: 'semantic-scholar', warning: joinWarnings(meta.warning, warning, S2_LICENSE_WARNING) };
+    return { ...meta, provider: 'semantic-scholar', warning: joinWarnings(meta.warning, warning,
+      [meta.warning, warning].some(w => w?.includes(S2_LICENSE_WARNING)) ? undefined : S2_LICENSE_WARNING) };
   }
 
   private failure(error: unknown): never {
@@ -172,39 +174,89 @@ export class SemanticService {
   private async collect(id: string, signal: AbortSignal): Promise<{ pool: Pool; expiresAt: number }> {
     const origin = await this.provider.getPaper(id, signal);
     if (semanticId(origin.paperId) !== id) throw new SemanticScholarError(502, 'Semantic Scholar origin ID mismatch');
+    const originPaper = normalizeSemanticPaper(origin);
     const inputs: object[] = [origin];
-    const refs = await this.provider.references(id, signal); inputs.push(refs);
-    const citers = await this.provider.citations(id, signal); inputs.push(citers);
+    const warnings: string[] = [];
+    let cooldownUntil = 0;
+    const acquire = async <T extends object>(label: string, fetch: () => Promise<T>): Promise<T | undefined> => {
+      signal.throwIfAborted();
+      if (Date.now() < cooldownUntil) {
+        warnings.push(`${label} skipped during Semantic Scholar rate-limit cooldown.`);
+        return undefined;
+      }
+      try {
+        const result = await fetch();
+        signal.throwIfAborted(); inputs.push(result);
+        return result;
+      } catch (error) {
+        signal.throwIfAborted();
+        if (error instanceof SemanticScholarError && error.status === 429) {
+          const retryAfter = Math.max(60, Number.isFinite(error.retryAfter) ? error.retryAfter! : 60);
+          cooldownUntil = Date.now() + retryAfter * 1000;
+          warnings.push(`${label} unavailable: Semantic Scholar rate limited; retry after ${Math.ceil(retryAfter)} seconds.`);
+        } else warnings.push(`${label} unavailable; successfully acquired metadata was retained.`);
+        return undefined;
+      }
+    };
     const records = new Map<string, SemanticPaper>([[id, origin]]);
-    const sampleIds: string[] = [];
-    for (const paper of [...refs.data.map(r => r.citedPaper), ...citers.data.map(r => r.citingPaper)]) {
-      if (!paper?.paperId) continue;
-      const key = semanticId(paper.paperId)!;
-      if (key === id) continue;
-      sampleIds.push(key);
-      // BasePaper has no outgoing references; batch FullPaper supplies them.
-      records.set(key, { ...paper, paperId: paper.paperId });
-    }
-    const hydrated = await this.provider.batch(sampleIds, signal);
-    if (sampleIds.length) inputs.push(hydrated);
-    for (const paper of hydrated) records.set(semanticId(paper.paperId)!, paper);
+    let skipped = 0;
+    const refs = await acquire('references endpoint', () => this.provider.references(id, signal));
+    const referenceIds = refs ? [...new Set(refs.data.flatMap(({ citedPaper: paper }) => {
+      const key = semanticId(paper?.paperId);
+      if (!key || key === id) return [];
+      // BasePaper has no outgoing references; retain it if FullPaper hydration fails.
+      if (paper!.title?.trim()) records.set(key, { ...paper!, paperId: paper!.paperId! });
+      else skipped++;
+      return [key];
+    }))] : originPaper.references.slice(0, 80);
+    // The endpoint observes these citations even when target metadata is unusable.
+    // Clone the origin, leaving raw-cache data and returned-object provenance intact.
+    if (refs) records.set(id, { ...origin, references: [...new Set([...originPaper.references, ...referenceIds])]
+      .map(key => ({ paperId: key.slice(3) })) });
+    const hydrate = async (ids: string[], label: string): Promise<SemanticPaper[]> => {
+      if (!ids.length) return [];
+      const hydrated = await acquire(label, () => this.provider.batch(ids, signal));
+      if (!hydrated) return [];
+      const usable = hydrated.filter(paper => {
+        if (paper.title?.trim()) return true;
+        skipped++; return false;
+      });
+      for (const paper of usable) if (records.has(semanticId(paper.paperId)!) || records.size < 300) records.set(semanticId(paper.paperId)!, paper);
+      const returned = new Set(hydrated.map(p => semanticId(p.paperId)!));
+      const missing = ids.filter(key => !returned.has(key)).length;
+      if (missing) warnings.push(`${label}: ${missing} requested records were not returned; missing metadata was not invented.`);
+      return usable;
+    };
+    // Preserve usable reference evidence before the optional citations endpoint can rate-limit.
+    const hydratedReferences = await hydrate(referenceIds, 'reference hydration');
+    const citers = await acquire('citations endpoint', () => this.provider.citations(id, signal));
+    const citerIds = citers ? [...new Set(citers.data.flatMap(({ citingPaper: paper }) => {
+      const key = semanticId(paper?.paperId);
+      if (!key || key === id) return [];
+      if (!paper!.title?.trim()) skipped++;
+      else if (!records.has(key)) records.set(key, { ...paper!, paperId: paper!.paperId! });
+      return [key];
+    }))] : [];
+    const hydratedCiters = await hydrate(citerIds.filter(key => records.get(key)?.references == null), 'citing-paper hydration');
     const common = new Map<string, number>();
     for (const paper of records.values()) for (const reference of new Set(normalizeSemanticPaper(paper).references)) {
       if (!records.has(reference)) common.set(reference, (common.get(reference) ?? 0) + 1);
     }
     const missing = [...common].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, Math.min(100, 300 - records.size)).map(([key]) => key);
-    const commonPapers = await this.provider.batch(missing, signal);
-    if (missing.length) inputs.push(commonPapers);
-    for (const paper of commonPapers) if (records.size < 300) records.set(semanticId(paper.paperId)!, paper);
+    const commonPapers = await hydrate(missing, 'common-reference hydration');
     signal.throwIfAborted();
+    if (skipped) warnings.push(`${skipped} optional records with missing or blank titles were skipped; paper metadata was not invented.`);
     const metadata = inputs.map(input => this.provider.metadata(input));
     const incomplete = [...records.values()].filter(p => p.references == null).length;
     const pool: Pool = { origin: id, provider: 'semantic-scholar', papers: [...records.values()].map(normalizeSemanticPaper),
       fetchedAt: metadata.map(m => m.fetchedAt).sort()[0], source: metadata.some(m => m.source === 'live') ? 'live' : 'cache',
-      coverage: `${records.size} fetched candidates: first ${refs.data.length} origin-reference records (limit 80), first ${citers.data.length} citing records (limit 100), batch-hydrated outgoing references, and ${commonPapers.length} common-reference records. API reference/citation order is unspecified, not citation-ranked; this independent sample is not exhaustive. ${incomplete} records have missing references, explicitly represented as empty arrays; unknown/null reference IDs are omitted and outgoing lists are capped at 2,500. Missing abstracts and indexing gaps reduce coverage. Co-citation is sample-local. No recommendation, topic, or direct-citation fallback edges. ${joinWarnings(...metadata.map(m => m.warning), S2_LICENSE_WARNING)}` };
+      ...(warnings.length ? { warning: `Partial Semantic Scholar acquisition: ${joinWarnings(...warnings)}` } : {}),
+      coverage: `${records.size} fetched candidates: ${refs ? `first ${refs.data.length} origin-reference records (limit 80; ${referenceIds.length} usable unique IDs)` : `references endpoint unavailable; first ${referenceIds.length} origin-returned reference IDs (limit 80)`}, ${citers ? `first ${citers.data.length} citing records (limit 100; ${citerIds.length} usable unique IDs)` : 'citing records were not fetched; the origin citation count is not an observed citer sample'}, ${hydratedReferences.length} reference and ${hydratedCiters.length} citing batch-hydrated records, and ${commonPapers.length} common-reference records. API reference/citation order is unspecified, not citation-ranked; this independent sample is not exhaustive. ${incomplete} records have missing references, explicitly represented as empty arrays; unknown/null reference IDs are omitted and outgoing lists are capped at 2,500. Origin references combine returned IDs with observed references-endpoint IDs, even when target metadata is unusable. Missing abstracts and indexing gaps reduce coverage. Co-citation is sample-local, derived only from acquired outgoing reference lists${!citers ? ', including reference papers, not a fetched origin-citer sample' : ''}. Similarity edges require shared-reference or sampled co-citation evidence; separately marked zero-weight direct-citation links provide citation context only. No recommendation or topic scores create edges. ${joinWarnings(...warnings, ...metadata.map(m => m.warning), S2_LICENSE_WARNING)}` };
     if (!PoolSchema.safeParse(pool).success) throw new SemanticScholarError(502, 'Invalid Semantic Scholar candidate pool');
-    return { pool, expiresAt: Math.min(...inputs.map(input => this.provider.expiresAt(input))) };
+    const now = Date.now();
+    const partialExpiry = warnings.length ? (cooldownUntil > now ? Math.min(cooldownUntil, now + 60 * 60 * 1000) : now + 5 * 60 * 1000) : Infinity;
+    return { pool, expiresAt: Math.min(partialExpiry, ...inputs.map(input => this.provider.expiresAt(input))) };
   }
 
   async graph(origins: string[], signal?: AbortSignal): Promise<GraphResponse> {
@@ -263,7 +315,7 @@ export class SemanticService {
       const response = buildGraph(bounded, origins, { provider: 'semantic-scholar',
         source: groups.some(g => g.pool.source === 'live') ? 'live' : 'cache', fetchedAt: groups.map(g => g.pool.fetchedAt).sort()[0],
         candidateCount: bounded.length, algorithm: '', coverage: [...new Set(groups.map(g => g.pool.coverage))].join(' '),
-        warning: joinWarnings(...warnings, 'Sampled Semantic Scholar data, not an exhaustive literature map. Co-citation is sample-local; an absent edge does not establish unrelatedness.', S2_LICENSE_WARNING) });
+        warning: joinWarnings(...warnings, ...groups.map(g => g.pool.warning), 'Sampled Semantic Scholar data, not an exhaustive literature map. Co-citation is sample-local; an absent edge does not establish unrelatedness.', S2_LICENSE_WARNING) });
       operation.throwIfAborted();
       await this.cache.set(key, response, fallback ? -1 : Math.min(...groups.map(g => g.expiresAt)) - Date.now());
       operation.throwIfAborted(); return response;

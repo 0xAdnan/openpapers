@@ -310,12 +310,17 @@ export class OpenAlexProvider {
   async search(q: string, page: number, signal?: AbortSignal) {
     const query = q.trim();
     const doi = query.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '');
-    // arXiv links and IDs resolve through their registered DataCite DOI; versions are dropped.
-    const arxiv = /^(?:arxiv:\s*|(?:https?:\/\/)?(?:www\.)?arxiv\.org\/(?:abs|pdf)\/)(\d{4}\.\d{4,5})(?:v\d+)?(?:\.pdf)?\/?$/i.exec(query);
+    // arXiv links, IDs and DOIs resolve through their registered DataCite DOI; versions are dropped.
+    const arxiv = /^(?:arxiv:\s*|(?:https?:\/\/)?(?:www\.)?arxiv\.org\/(?:abs|pdf)\/|10\.48550\/arxiv\.)?(\d{4}\.\d{4,5})(?:v\d+)?(?:\.pdf)?\/?$/i.exec(doi);
     const pmid = /^(?:pmid:?\s*|(?:https?:\/\/)?pubmed\.ncbi\.nlm\.nih\.gov\/)(\d{1,9})\/?$/i.exec(query);
     const params: Record<string, string> = { per_page: '20', page: String(page), select: SELECT };
-    if (arxiv) params.filter = `doi:https://doi.org/10.48550/arxiv.${arxiv[1]}`;
-    else if (pmid) params.filter = `ids.pmid:${pmid[1]}`;
+    if (arxiv) {
+      const id = arxiv[1];
+      const byDoi = await this.request<WorksPage>('/works', { ...params, filter: `doi:https://doi.org/10.48550/arxiv.${id}` }, signal);
+      if (byDoi.meta.count) return byDoi;
+      // New preprints can be indexed before OpenAlex links the DOI; they still carry the arXiv landing page.
+      params.filter = `locations.landing_page_url:https://arxiv.org/abs/${id}|http://arxiv.org/abs/${id}`;
+    } else if (pmid) params.filter = `ids.pmid:${pmid[1]}`;
     else if (/^10\.\d{4,9}\/[^\s,|]+$/i.test(doi)) params.filter = `doi:https://doi.org/${doi}`;
     else params.search = q;
     return this.request<WorksPage>('/works', params, signal);
