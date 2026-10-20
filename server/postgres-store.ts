@@ -1,12 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import pg, { type PoolClient, type PoolConfig, type QueryConfig } from 'pg';
 import { z } from 'zod';
-import { GRAPH_JOB_VERSION, GraphJobSchema, type GraphJob, type LeasedGraphJob, type PageCommit } from '../shared/graph-jobs.ts';
+import { GRAPH_JOB_VERSION, GRAPH_RESULT_MAX_AGE_MS, GRAPH_RESULT_REFRESH_MS, GraphJobSchema, type GraphJob, type LeasedGraphJob, type PageCommit } from '../shared/graph-jobs.ts';
 import { GraphResponseSchema, PaperSchema } from '../shared/schemas.ts';
 import type { Paper } from '../shared/types.ts';
+import { ALGORITHM } from './graph.ts';
 import type { GraphJobStore } from './graph-store.ts';
 import { SUPABASE_CA } from './supabase-ca.ts';
 
+// A scoring change must never reuse results or resume jobs built under another algorithm,
+// even if GRAPH_JOB_VERSION was not bumped by hand.
+export const JOB_VERSION = `${GRAPH_JOB_VERSION}:${createHash('sha256').update(ALGORITHM).digest('hex').slice(0, 16)}`;
 const MIGRATION = '202610140001_graph_jobs';
 const RESOURCE_LOCK = '764521340002';
 const PAPER_READ_BATCH = 2000;
@@ -46,6 +50,8 @@ export interface PostgresGraphStoreOptions {
   maxActiveJobs?: number;
   maxCompletedJobs?: number;
   retentionMs?: number;
+  resultMaxAgeMs?: number;
+  refreshMs?: number;
   /** PEM certificate authority for a remote server; verification is never disabled. */
   ca?: string;
 }
@@ -115,6 +121,8 @@ export class PostgresGraphStore implements GraphJobStore {
       leaseMs: integer(options.leaseMs, 120000, 50, 300000), pacingMs: integer(options.pacingMs, 250, 0, 60000),
       maxActiveJobs: integer(options.maxActiveJobs, 4, 1, 4), maxCompletedJobs: integer(options.maxCompletedJobs, 30, 0, 30),
       retentionMs: integer(options.retentionMs, 7 * 86400000, 1, 7 * 86400000),
+      resultMaxAgeMs: integer(options.resultMaxAgeMs, GRAPH_RESULT_MAX_AGE_MS, 0, 7 * 86400000),
+      refreshMs: integer(options.refreshMs, GRAPH_RESULT_REFRESH_MS, 0, 7 * 86400000),
     };
     this.pool = new pg.Pool(graphPostgresPoolConfig(databaseUrl, { ...options, ca: options.ca ?? process.env.GRAPH_DATABASE_CA }));
     // Idle connection errors must not crash the process or leak a connection URL.
@@ -178,7 +186,7 @@ export class PostgresGraphStore implements GraphJobStore {
         ELSE 'Graph job exceeded its 24-hour lifetime; submit again.' END,
       updated_at = clock_timestamp()
       WHERE state IN ('queued', 'running', 'paused')
-        AND (version <> $1 OR created_at < clock_timestamp() - interval '24 hours')`, [GRAPH_JOB_VERSION]);
+        AND (version <> $1 OR created_at < clock_timestamp() - interval '24 hours')`, [JOB_VERSION]);
     await client.query(`DELETE FROM openpapers.graph_admission
       WHERE budget_day < (clock_timestamp() AT TIME ZONE 'UTC')::date`);
     await client.query(`DELETE FROM openpapers.graph_jobs WHERE id IN (
@@ -188,19 +196,24 @@ export class PostgresGraphStore implements GraphJobStore {
     [this.limits.maxCompletedJobs, this.limits.retentionMs]);
   }
 
-  async create(origins: string[], candidateBudget: number, requestBudget: number, callerKey?: string): Promise<GraphJob> {
+  async create(origins: string[], candidateBudget: number, requestBudget: number, callerKey?: string, refresh = false): Promise<GraphJob> {
     const canonical = z.array(oaId).min(1).max(3).refine(ids => new Set(ids).size === ids.length).parse(origins).sort();
     z.number().int().min(40).max(50000).parse(candidateBudget);
     z.number().int().min(1).max(1500).parse(requestBudget);
     if (callerKey !== undefined) z.string().regex(/^[0-9a-f]{64}$/).parse(callerKey);
     const referenceBudget = Math.min(this.limits.referenceBudget, this.limits.totalReferenceBudget);
-    const key = createHash('sha256').update(JSON.stringify([GRAPH_JOB_VERSION, canonical, candidateBudget, requestBudget, referenceBudget])).digest('hex');
+    const key = createHash('sha256').update(JSON.stringify([JOB_VERSION, canonical, candidateBudget, requestBudget, referenceBudget])).digest('hex');
     return this.transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock($1::bigint)', [RESOURCE_LOCK]);
       await this.prune(client);
-      const existing = await client.query('SELECT * FROM openpapers.graph_jobs WHERE cache_key = $1', [key]);
-      if (existing.rows.length && existing.rows[0].state !== 'failed') return publicJob(existing.rows[0]);
-      if (existing.rows.length) await client.query('DELETE FROM openpapers.graph_jobs WHERE cache_key = $1 AND state = \'failed\'', [key]);
+      const existing = await client.query(`SELECT *, updated_at <= clock_timestamp() - $2 * interval '1 millisecond' AS outdated
+        FROM openpapers.graph_jobs WHERE cache_key = $1`, [key, refresh ? this.limits.refreshMs : this.limits.resultMaxAgeMs]);
+      const previous = existing.rows[0];
+      if (previous && previous.state !== 'failed' && !(previous.state === 'completed' && previous.outdated)) return publicJob(previous);
+      if (previous?.state === 'failed') await client.query('DELETE FROM openpapers.graph_jobs WHERE cache_key = $1 AND state = \'failed\'', [key]);
+      // A superseded result stays readable by job ID (shared links) until normal retention prunes it.
+      else if (previous) await client.query('UPDATE openpapers.graph_jobs SET cache_key = $2 WHERE id = $1',
+        [previous.id, createHash('sha256').update(`${key}:${previous.id}`).digest('hex')]);
       const active = await client.query(`SELECT count(*)::integer AS count FROM openpapers.graph_jobs WHERE state IN ('queued', 'running', 'paused')`);
       if (active.rows[0].count >= this.limits.maxActiveJobs) throw new Error('Graph job queue is full');
       if (callerKey !== undefined) {
@@ -217,7 +230,7 @@ export class PostgresGraphStore implements GraphJobStore {
       const { rows } = await client.query(`INSERT INTO openpapers.graph_jobs
         (id, cache_key, version, origins, state, phase, candidate_budget, reference_budget, request_budget, checkpoint, caller_key)
         VALUES ($1, $2, $3, $4, 'queued', 'acquire', $5, $6, $7, $8::jsonb, $9) RETURNING *`,
-      [randomUUID(), key, GRAPH_JOB_VERSION, canonical, candidateBudget, referenceBudget, requestBudget, checkpoint, callerKey ?? null]);
+      [randomUUID(), key, JOB_VERSION, canonical, candidateBudget, referenceBudget, requestBudget, checkpoint, callerKey ?? null]);
       return publicJob(rows[0]);
     });
   }
@@ -241,7 +254,7 @@ export class PostgresGraphStore implements GraphJobStore {
         UPDATE openpapers.graph_jobs j SET state = 'running', lease_token = $3,
           lease_expires_at = clock_timestamp() + $4 * interval '1 millisecond',
           request_reserved = false, next_run_at = NULL, updated_at = clock_timestamp()
-        FROM due WHERE j.id = due.id RETURNING j.*`, [GRAPH_JOB_VERSION, id ?? null, randomUUID(), this.limits.leaseMs]);
+        FROM due WHERE j.id = due.id RETURNING j.*`, [JOB_VERSION, id ?? null, randomUUID(), this.limits.leaseMs]);
       if (!rows.length) return undefined;
       const { version: _version, ...checkpoint } = storedCheckpointSchema.parse(rows[0].checkpoint);
       return { ...publicJob(rows[0]), leaseToken: rows[0].lease_token, checkpoint };

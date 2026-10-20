@@ -94,8 +94,12 @@ so later requests can attempt a fuller neighborhood.
 Semantic Scholar keys are sent only through the server-side `x-api-key` header.
 All endpoints share a key-based limiter: one active request, at least 1,250 ms
 after completion, and shared `Retry-After` cooldowns. On Vercel, Supabase's private
-`semantic_api_budget` table coordinates instances. Apply migrations with
-`make migrate` before enabling this mode. The table contains a key hash, not the key.
+`semantic_api_budget` and `semantic_cache` tables coordinate rate limits and share
+validated S2 responses across serverless instances without renewing original TTLs.
+Apply migrations with `make migrate` before enabling this mode. The tables never
+store raw API keys. Cached graphs validate the active scoring algorithm version,
+cap outage fallbacks at 30 days with an explicit age warning, and allow completed
+research jobs older than one hour to be refreshed without breaking shared job links.
 
 S2 data/API terms are separate from the application's MIT license. No S2 corpus
 or temporary research capture is bundled with this repository.

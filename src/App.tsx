@@ -13,6 +13,7 @@ import featuredPreviews from './featured-previews.json';
 import GraphShare from './components/GraphShare';
 import { graphShareLink } from '../shared/share-link';
 import useGraphJob from './hooks/useGraphJob';
+import { GRAPH_RESULT_REFRESH_MS } from '../shared/graph-jobs';
 
 const number = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const exactNumber = new Intl.NumberFormat('en');
@@ -362,7 +363,7 @@ function Workspace() {
           {job.state === 'paused' && <p>{job.nextRunAt ? <>Next server run no earlier than <time dateTime={job.nextRunAt}>{new Date(job.nextRunAt).toLocaleString()}</time>.</> : 'Waiting for the server to resume.'}</p>}
           {job.stopReason && <p>Acquisition stopped: {({ candidate_budget: 'candidate target reached', request_budget: 'request attempt limit reached', reference_budget: 'reference entry limit reached', frontier_exhausted: 'available acquisition tasks exhausted', invalid_origins: 'invalid origin papers', unknown_origin: 'origin paper not found', provider_rejected: 'data provider rejected the request', provider_unavailable: 'data provider unavailable', missing_origin_metadata: 'origin metadata missing', response_too_large: 'result exceeded the response size limit' } as Record<string, string>)[job.stopReason] ?? job.stopReason.replaceAll('_', ' ').slice(0, 200)}.</p>}
           {job.error && <p>{job.error.slice(0, 500)}</p>}
-          {job.state === 'completed' && <p>Showing up to 40 papers from the acquired candidates, not an exhaustive literature survey.</p>}
+          {job.state === 'completed' && <p>Showing up to 40 papers from the acquired candidates, not an exhaustive literature survey. Completed <time dateTime={job.updatedAt}>{new Date(job.updatedAt).toLocaleString()}</time>.</p>}
           <progress aria-label="Candidates acquired" value={Math.min(job.acquiredCount, job.candidateBudget)} max={job.candidateBudget} />
         </> : !expansion.id && !expansion.creating && <p>Expand only when needed. The graph stays small while the server acquires more candidates.</p>}
         {expansion.error && <p>{expansion.error}</p>}
@@ -371,6 +372,7 @@ function Workspace() {
         {expansion.available && !expansion.id && <button className="secondary small" disabled={!quickData || expansion.creating} onClick={() => setDialog('expand')}>Expand research</button>}
         {expansion.id && (expansion.error || !expansion.watching) && <button className="secondary small" onClick={expansion.resume}>Resume updates</button>}
         {expansion.id && expansion.watching && job?.state !== 'completed' && job?.state !== 'failed' && <button className="text-button" title="Stops polling on this page only. The server job continues; keep this URL to resume." onClick={expansion.stopWatching}>Hide updates</button>}
+        {expansion.available && job?.state === 'completed' && Date.now() - Date.parse(job.updatedAt) >= GRAPH_RESULT_REFRESH_MS && <button className="secondary small" disabled={expansion.creating} title="Acquire this research graph again from current source data." onClick={() => void expansion.refresh()}>{expansion.creating ? 'Refreshing...' : 'Refresh research'}</button>}
         {(expansion.error || job?.state === 'failed') && <button className="text-button" onClick={expansion.forget}>Remove job from view</button>}
       </div>
     </section>}

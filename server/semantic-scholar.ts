@@ -232,8 +232,23 @@ export class SemanticScholarProvider {
   async getPaper(id: string, signal?: AbortSignal): Promise<SemanticPaper> {
     const lookup = semanticLookup(id);
     if (!lookup) throw new SemanticScholarError(400, 'Use a Semantic Scholar paper ID, DOI, or arXiv ID');
-    return this.request(`/graph/v1/paper/${encodeURIComponent(lookup)}`, { fields: S2_FULL_FIELDS }, RawPaperSchema,
+    const paper = await this.request(`/graph/v1/paper/${encodeURIComponent(lookup)}`, { fields: S2_FULL_FIELDS }, RawPaperSchema,
       p => !hex.test(lookup) || p.paperId.toLowerCase() === lookup.toLowerCase(), signal);
+    const expiresAt = this.expiresAt(paper);
+    if (!hex.test(lookup) && expiresAt > Date.now()) {
+      signal?.throwIfAborted();
+      const url = new URL(`/graph/v1/paper/${paper.paperId.toLowerCase()}`, S2_ORIGIN);
+      url.searchParams.set('fields', S2_FULL_FIELDS);
+      const canonicalKey = `s2:raw:v1:GET:${url.pathname}${url.search}`;
+      const existing = await this.options.cache.get<unknown>(canonicalKey);
+      signal?.throwIfAborted();
+      const meta = this.metadata(paper);
+      const parsed = existing && z.object({ data: RawPaperSchema, meta: MetaSchema }).safeParse(existing.value);
+      if (!existing || !parsed?.success || Date.parse(parsed.data.meta.fetchedAt) <= Date.parse(meta.fetchedAt) && existing.expiresAt <= expiresAt) {
+        await this.options.cache.set(canonicalKey, { data: paper, meta }, expiresAt - Date.now());
+      }
+    }
+    return paper;
   }
 
   async search(q: string, page: number, signal?: AbortSignal): Promise<SemanticSearchPage> {

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { S2_ID_PATTERN } from '../shared/providers.ts';
 import { CandidatePoolSchema, GraphResponseSchema, PaperResponseSchema, SearchResponseSchema } from '../shared/schemas.ts';
 import type { DataMeta, GraphResponse, Paper, SearchResponse } from '../shared/types.ts';
-import { PersistentCache } from './cache.ts';
+import { PersistentCache, staleAge } from './cache.ts';
 import { ALGORITHM, buildGraph } from './graph.ts';
 import { ApiError, localSearch } from './service.ts';
 import { normalizeSemanticPaper, S2_LICENSE_WARNING, S2_SEARCH_WARNING, semanticId, semanticLookup,
@@ -291,8 +291,9 @@ export class SemanticService {
           if (error instanceof SemanticScholarError && error.status === 404) this.failure(error);
           const stale = await this.cached(key, GraphSchema, true);
           operation.throwIfAborted();
-          if (stale && exactOrigins(stale.value)) return { ...stale.value, meta: { ...stale.value.meta,
-            ...this.metadata({ ...stale.value.meta, source: 'cache' }, 'Semantic Scholar unavailable; returning a stale cached graph.') } };
+          const age = stale && staleAge(stale.value.meta.fetchedAt);
+          if (stale && age && exactOrigins(stale.value)) return { ...stale.value, meta: { ...stale.value.meta,
+            ...this.metadata({ ...stale.value.meta, source: 'cache' }, `Semantic Scholar unavailable; returning a stale cached graph whose data is ${age}.`) } };
         }
         fallback = true;
         const reason = this.offline ? 'Offline' : 'Semantic Scholar unavailable';

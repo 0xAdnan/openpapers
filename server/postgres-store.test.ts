@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import test, { type TestContext } from 'node:test';
 import pg from 'pg';
-import type { JobCheckpoint, LeasedGraphJob, PageCommit } from '../shared/graph-jobs.ts';
+import { GRAPH_JOB_VERSION, type JobCheckpoint, type LeasedGraphJob, type PageCommit } from '../shared/graph-jobs.ts';
 import type { GraphResponse, Paper } from '../shared/types.ts';
 import { migrateGraphJobs } from '../scripts/migrate-graph-jobs.ts';
-import { graphPostgresPoolConfig, PostgresGraphStore, type PostgresGraphStoreOptions } from './postgres-store.ts';
+import { ALGORITHM } from './graph.ts';
+import { graphPostgresPoolConfig, JOB_VERSION, PostgresGraphStore, type PostgresGraphStoreOptions } from './postgres-store.ts';
 
 const checkpoint: JobCheckpoint = { frontier: [], seeded: ['W1'], expanded: [] };
 function paper(id = 'W1', references: string[] = []): Paper {
@@ -94,7 +95,7 @@ test('PostgreSQL durable graph store', { skip: !process.env.GRAPH_TEST_DATABASE_
     const tables = await sql.query(`SELECT c.relname, c.relrowsecurity, pg_get_userbyid(c.relowner) AS owner,
       coalesce((SELECT bool_or(privilege_type IS NOT NULL) FROM aclexplode(c.relacl) WHERE grantee = 0), false) AS public_access
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'openpapers' AND c.relkind = 'r'`);
-    assert.equal(tables.rows.length, 7);
+    assert.equal(tables.rows.length, 8);
     for (const row of tables.rows) { assert.equal(row.relrowsecurity, true); assert.equal(row.owner, 'postgres'); assert.equal(row.public_access, false); }
     assert.equal((await sql.query(`SELECT count(*)::integer AS count FROM pg_policies WHERE schemaname = 'openpapers'`)).rows[0].count, 0);
     for (const role of ['anon', 'authenticated', 'service_role']) {
@@ -467,6 +468,42 @@ test('PostgreSQL durable graph store', { skip: !process.env.GRAPH_TEST_DATABASE_
     await sql.query(`UPDATE openpapers.graph_jobs SET updated_at = clock_timestamp() - interval '8 days' WHERE id = $1`, [second.id]);
     await store.create(['W3'], 100, 10);
     assert.equal(await store.get(second.id), undefined);
+  });
+
+  await t.test('completed results are reused only while recent and refresh rebuilds older ones without breaking links', async context => {
+    const store = await setup(context);
+    const age = (id: string, interval: string) =>
+      sql.query(`UPDATE openpapers.graph_jobs SET updated_at = clock_timestamp() - $2::interval WHERE id = $1`, [id, interval]);
+    const first = await leased(store);
+    await store.commit(first, page([paper('W1', ['W2'])], { state: 'completed', result: graph() }));
+    assert.equal((await store.create(['W1'], 100, 10, undefined, true)).id, first.id, 'A result under an hour old is not rebuilt');
+    await age(first.id, '2 hours');
+    assert.equal((await store.create(['W1'], 100, 10)).id, first.id, 'Plain submissions reuse results within the max age');
+    const refreshed = await store.create(['W1'], 100, 10, undefined, true);
+    assert.notEqual(refreshed.id, first.id); assert.equal(refreshed.state, 'queued'); assert.equal(refreshed.acquiredCount, 0);
+    assert.equal((await store.create(['W1'], 100, 10, undefined, true)).id, refreshed.id, 'Refresh never duplicates an active job');
+    const superseded = (await store.get(first.id))!;
+    assert.equal(superseded.state, 'completed', 'A superseded result still resolves by job ID');
+    assert.ok(superseded.result);
+    const second = await leased(store, 'W2');
+    await store.commit(second, page([paper('W2', ['W1'])], { state: 'completed', result: graph(['W2']) }));
+    await age(second.id, '49 hours');
+    const replaced = await store.create(['W2'], 100, 10);
+    assert.notEqual(replaced.id, second.id, 'Results past the max age are rebuilt on a plain submission');
+    assert.equal((await store.get(second.id))!.state, 'completed');
+  });
+
+  await t.test('job versions follow the scoring algorithm, so results from another algorithm are never reused', async context => {
+    const store = await setup(context);
+    assert.equal(JOB_VERSION, `${GRAPH_JOB_VERSION}:${createHash('sha256').update(ALGORITHM).digest('hex').slice(0, 16)}`);
+    const first = await leased(store);
+    await store.commit(first, page([paper('W1')], { state: 'completed', result: graph() }));
+    assert.equal((await sql.query('SELECT version FROM openpapers.graph_jobs WHERE id = $1', [first.id])).rows[0].version, JOB_VERSION);
+    // Simulate a completed result keyed by a previous algorithm.
+    const legacyKey = createHash('sha256').update(JSON.stringify(['legacy-algorithm', ['W1'], 100, 10, 500000])).digest('hex');
+    await sql.query(`UPDATE openpapers.graph_jobs SET version = 'legacy-algorithm', cache_key = $2 WHERE id = $1`, [first.id, legacyKey]);
+    const rebuilt = await store.create(['W1'], 100, 10);
+    assert.notEqual(rebuilt.id, first.id); assert.equal(rebuilt.state, 'queued');
   });
 
   await t.test('papers keyset batches cross 2000-record boundaries with exact counts', async context => {

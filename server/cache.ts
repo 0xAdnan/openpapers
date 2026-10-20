@@ -9,6 +9,19 @@ interface Entry<T> {
   value: T;
 }
 
+/** Outage fallbacks never serve data fetched longer ago than this, however it is labelled. */
+export const MAX_STALE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Readable age of data fetched at `fetchedAt`, or undefined when it is undated or too old for an outage fallback. */
+export function staleAge(fetchedAt: string, now = Date.now()): string | undefined {
+  const age = now - Date.parse(fetchedAt);
+  if (!Number.isFinite(age) || age < -60000 || age > MAX_STALE_MS) return undefined;
+  const hours = Math.max(0, Math.floor(age / 3600000));
+  if (hours < 1) return 'less than an hour old';
+  if (hours < 48) return `${hours} ${hours === 1 ? 'hour' : 'hours'} old`;
+  return `${Math.floor(hours / 24)} days old`;
+}
+
 // One bounded file, atomically replaced; keys never become filesystem paths.
 export class PersistentCache {
   private entries = new Map<string, Entry<unknown>>();

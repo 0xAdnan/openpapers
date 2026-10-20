@@ -146,7 +146,7 @@ test('identifier search resolves safely encoded DOI segments and aliases, includ
     const url = new URL(String(input)); paths.push(url.pathname);
     assert.equal(url.origin, S2_ORIGIN);
     assert.equal(url.pathname.split('/').length, 5, 'DOI slashes must remain inside one encoded segment');
-    return Response.json({ ...record(1), externalIds: { DOI: '10.1234/test/thing' } });
+    return Response.json(url.pathname.endsWith(sha(2)) ? record(2) : { ...record(1), externalIds: { DOI: '10.1234/test/thing' } });
   } });
   const service = new SemanticService(cache, false, provider);
   const doi = await service.search('https://doi.org/10.1234/Test/Thing', 1);
@@ -156,8 +156,10 @@ test('identifier search resolves safely encoded DOI segments and aliases, includ
   assert.deepEqual((await service.search('DOI:10.1234/test/thing', 2)).results, []);
   const bySha = await service.search(sha(1), 1);
   assert.equal(bySha.results[0].id, id(1));
+  assert.equal(bySha.meta.source, 'cache');
   assert.equal((await service.search(id(1), 1)).results[0].id, id(1));
   assert.equal((await service.search(`https://www.semanticscholar.org/paper/Title/${sha(1)}`, 1)).results[0].id, id(1));
+  assert.equal((await service.search(sha(2), 1)).results[0].id, id(2));
   const arxiv = await service.search('arxiv:1706.03762', 1);
   assert.equal(arxiv.results[0].id, id(1));
   assert.ok(paths.includes('/graph/v1/paper/ARXIV%3A1706.03762'));

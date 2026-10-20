@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PersistentCache } from './cache.ts';
+import { PersistentSemanticCache } from './semantic-database-cache.ts';
 import { ApiError, PaperService } from './service.ts';
 import { SemanticService } from './semantic-service.ts';
 import { PAPER_ID_PATTERN, paperProvider, providerName, type ProviderId } from '../shared/providers.ts';
@@ -16,7 +17,9 @@ import { GraphFallbackCoordinator } from './graph-fallback.ts';
 
 export function createApp(options: { service?: PaperService; semanticService?: SemanticService; defaultProvider?: ProviderId; offline?: boolean; rateLimit?: number; distPath?: string; requestTimeoutMs?: number; cacheDirectory?: string; snapshotPath?: string; maxResponseBytes?: number; jobStore?: GraphJobStore; jobRunner?: GraphJobRunner; background?: (task: Promise<unknown>) => void } = {}) {
   const offline = options.offline ?? /^(1|true)$/i.test(process.env.OFFLINE ?? '');
-  const cache = new PersistentCache(options.cacheDirectory ?? fileURLToPath(new URL('../.cache/', import.meta.url)));
+  const cacheDirectory = options.cacheDirectory ?? fileURLToPath(new URL('../.cache/', import.meta.url));
+  const cache = !options.semanticService && !offline && process.env.S2_API_KEY && process.env.DATABASE_URL
+    ? new PersistentSemanticCache(cacheDirectory, process.env.DATABASE_URL) : new PersistentCache(cacheDirectory);
   const service = options.service ?? new PaperService(cache, offline, undefined, options.snapshotPath);
   const semanticService = options.semanticService ?? new SemanticService(cache, offline);
   const jobStore = options.jobStore ?? (process.env.DATABASE_URL && !offline ? new PostgresGraphStore() : undefined);
@@ -132,13 +135,13 @@ export function createApp(options: { service?: PaperService; semanticService?: S
       persistence: available ? 'postgres' : 'none' });
   }));
   const submitSchema = z.object({ origins: z.array(z.string().regex(/^W[1-9]\d{0,14}$/)).min(1).max(3),
-    candidateBudget: z.number().int().min(40).max(50000).optional() }).strict();
+    candidateBudget: z.number().int().min(40).max(50000).optional(), refresh: z.boolean().optional() }).strict();
   app.post('/api/graph-jobs', express.json({ limit: '2kb' }), route(async (req, res) => {
     const parsed = submitSchema.safeParse(req.body);
     if (!parsed.success || new Set(parsed.data.origins).size !== parsed.data.origins.length) throw new ApiError(400, 'Use 1 to 3 distinct origin papers and a candidate budget from 40 to 50,000');
     if (!jobStore || !jobRunner) throw new ApiError(503, 'Persistent graph jobs are not configured');
     const budget = Math.min(parsed.data.candidateBudget ?? candidateBudget, candidateBudget);
-    const job = await jobStore.create(parsed.data.origins, budget, requestBudget);
+    const job = await jobStore.create(parsed.data.origins, budget, requestBudget, undefined, parsed.data.refresh);
     if (!res.writableEnded) res.status(job.state === 'completed' ? 200 : 202).json(job);
     if (job.state !== 'completed' && job.state !== 'failed') background(jobRunner.runStep(job.id).catch(() => {}));
   }));

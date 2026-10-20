@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { z } from 'zod';
 import type { DataMeta, Example, GraphResponse, Paper, SearchResponse } from '../shared/types.ts';
-import { PersistentCache } from './cache.ts';
+import { PersistentCache, staleAge } from './cache.ts';
 import { collectCandidates, type CandidatePool } from './collection.ts';
 import { ALGORITHM, buildGraph } from './graph.ts';
 import { SEEDS, auditedConflict, seedConflict } from './integrity.ts';
@@ -278,7 +278,8 @@ export class PaperService {
           if (error instanceof ApiError) throw error;
           if (error instanceof ProviderError && error.status === 404) throw new ApiError(404, `Graph connections for paper ${id} are unavailable`, 'neighborhood_unavailable');
           const stale = await this.cached(key, GraphResponseSchema, true);
-          if (stale && stale.value.origins.join(',') === origins.join(',')) return { ...stale.value, meta: this.integrityMeta({ ...stale.value.meta, source: 'cache', warning: [stale.value.meta.warning, 'The paper data service is unavailable; returning a cached graph.'].filter(Boolean).join(' ') }, [...stale.value.nodes, ...stale.value.prior, ...stale.value.derivative]) };
+          const age = stale && staleAge(stale.value.meta.fetchedAt);
+          if (stale && age && stale.value.origins.join(',') === origins.join(',')) return { ...stale.value, meta: this.integrityMeta({ ...stale.value.meta, source: 'cache', warning: [stale.value.meta.warning, `The paper data service is unavailable; returning a cached graph whose data is ${age}.`].filter(Boolean).join(' ') }, [...stale.value.nodes, ...stale.value.prior, ...stale.value.derivative]) };
         }
         fallback = true;
         const reason = this.offline ? 'Offline mode' : 'The paper data service is unavailable';

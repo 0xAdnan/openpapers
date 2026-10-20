@@ -2,6 +2,10 @@ import { z } from 'zod';
 import { GraphResponseSchema } from './schemas';
 
 export const GRAPH_JOB_VERSION = 'neighborhood-v1-indexed-v2';
+// Identical submissions reuse a completed result only while it is this recent.
+export const GRAPH_RESULT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+// An explicit refresh rebuilds any completed result at least this old.
+export const GRAPH_RESULT_REFRESH_MS = 60 * 60 * 1000;
 export const GraphJobSchema = z.object({
   id: z.string().uuid(),
   origins: z.array(z.string().regex(/^W[1-9]\d{0,14}$/)).min(1).max(3),

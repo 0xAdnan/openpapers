@@ -7,11 +7,12 @@ import { graphPostgresPoolConfig } from '../server/postgres-store.ts';
 export async function migrateGraphJobs(databaseUrl: string): Promise<void> {
   const sql = await readFile(new URL('../supabase/migrations/202610140001_graph_jobs.sql', import.meta.url), 'utf8');
   const semanticSql = await readFile(new URL('../supabase/migrations/20261019093612_semantic_api_budget.sql', import.meta.url), 'utf8');
+  const semanticCacheSql = await readFile(new URL('../supabase/migrations/20261019105844_semantic_cache.sql', import.meta.url), 'utf8');
   const pool = new pg.Pool(graphPostgresPoolConfig(databaseUrl, { max: 1, ca: process.env.GRAPH_DATABASE_CA }));
   pool.on('error', () => {});
   try {
     const client = await pool.connect();
-    try { await client.query(sql); await client.query(semanticSql); }
+    try { await client.query(sql); await client.query(semanticSql); await client.query(semanticCacheSql); }
     catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
     finally { client.release(); }
   } finally { await pool.end(); }
@@ -25,7 +26,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } else {
     try {
       await migrateGraphJobs(databaseUrl);
-      console.log('Graph jobs and Semantic Scholar budget migrations applied.');
+      console.log('Graph jobs, Semantic Scholar budget and cache migrations applied.');
     } catch {
       // Database errors can contain connection details; never print them here.
       console.error('Graph jobs migration failed; verify database access, verified TLS and postgres ownership.');

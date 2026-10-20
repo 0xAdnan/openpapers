@@ -7,6 +7,7 @@ import { ID_PATTERN } from './openalex.ts';
 import type { SemanticService } from './semantic-service.ts';
 import { normalizeSemanticPaper, semanticLookup } from './semantic-scholar.ts';
 import { ApiError, type PaperService } from './service.ts';
+import { SemanticScholarError } from './semantic-scholar.ts';
 
 export function graphCoverage(graph: GraphResponse) {
   const nodes = new Set(graph.nodes.map(p => p.id));
@@ -69,6 +70,7 @@ export class GraphFallbackCoordinator {
     }
     if (original && (!this.enabled || original.nodes.length > 3 && original.edges.length > 0)) return original;
 
+    let phase = 'metadata';
     try {
       // Resolve every exact OA origin before any S2 work, including a neighborhood-level 404.
       const papers: Paper[] = [];
@@ -80,6 +82,7 @@ export class GraphFallbackCoordinator {
         papers.push(paper);
       }
       const resolved: string[] = [];
+      phase = 'identity';
       for (const paper of papers) {
         signal?.throwIfAborted();
         const alias = arxivAlias(paper.url);
@@ -111,6 +114,7 @@ export class GraphFallbackCoordinator {
         resolved.push(unique[0]);
       }
       signal?.throwIfAborted();
+      phase = 'graph';
       const alternative = await this.semantic.graph(resolved, signal);
       signal?.throwIfAborted();
       if (!GraphResponseSchema.safeParse(alternative).success || alternative.meta.provider !== 'semantic-scholar' ||
@@ -136,6 +140,10 @@ export class GraphFallbackCoordinator {
     } catch (error) {
       signal?.throwIfAborted();
       if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) throw error;
+      const reason = error instanceof SemanticScholarError && error.message.includes('rate gate') ? 'rate_gate_unavailable'
+        : error instanceof SemanticScholarError ? `upstream_${error.status}`
+        : error instanceof ApiError ? `service_${error.status}` : 'identity_or_coverage';
+      console.warn('Graph fallback unavailable:', phase, reason);
       if (original) return original;
       throw originalError;
     }

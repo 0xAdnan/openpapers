@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CandidatePoolSchema, GraphResponseSchema } from '../shared/schemas.ts';
 import type { DataMeta } from '../shared/types.ts';
-import { PersistentCache } from './cache.ts';
+import { MAX_STALE_MS, PersistentCache, staleAge } from './cache.ts';
 import { ALGORITHM, buildGraph } from './graph.ts';
 import { ApiError } from './service.ts';
 import { SemanticService } from './semantic-service.ts';
@@ -326,7 +326,8 @@ test('partial cache is served without traffic until expiry, then re-expands afte
 });
 
 test('stale partial outage fallback preserves its original pool and graph expiry without renewal', async t => {
-  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  // Fixture records are fetched at 2020-01-01; stay within the outage fallback age cap.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2020-01-01T12:00:00.000Z') });
   const { service, provider, directory, cache } = await setup(t);
   provider.citations = async () => { throw new SemanticScholarError(429, undefined, 60); };
   const first = await service.graph([id(1)]);
@@ -338,11 +339,32 @@ test('stale partial outage fallback preserves its original pool and graph expiry
   const restarted = new SemanticService(restartedCache, false, provider);
   const stale = await restarted.graph([id(1)]);
   assert.equal(stale.meta.fetchedAt, first.meta.fetchedAt);
-  assert.match(stale.meta.warning!, /stale cached graph/);
+  assert.match(stale.meta.warning!, /stale cached graph whose data is 12 hours old/);
   assert.match(stale.meta.warning!, /Partial.*citations/);
   assert.equal((await restartedCache.get(`s2:pool:v1:${id(1)}`, true))!.expiresAt, poolExpiry);
   assert.equal((await restartedCache.get(`s2:graph:v1:${id(1)}`, true))!.expiresAt, graphExpiry);
   assert.equal(await restartedCache.get(`s2:graph:v1:${id(1)}`), undefined);
+});
+
+test('outage fallback labels stale graph age and refuses data past the age cap', async t => {
+  assert.equal(staleAge('2020-01-01T00:00:00.000Z', Date.parse('2020-01-01T00:30:00.000Z')), 'less than an hour old');
+  assert.equal(staleAge('2020-01-01T00:00:00.000Z', Date.parse('2020-01-02T01:00:00.000Z')), '25 hours old');
+  assert.equal(staleAge('2020-01-01T00:00:00.000Z', Date.parse('2020-01-04T00:00:00.000Z')), '3 days old');
+  assert.equal(staleAge('2020-01-01T00:00:00.000Z', Date.parse('2020-01-01T00:00:00.000Z') + MAX_STALE_MS + 1), undefined);
+  assert.equal(staleAge('2020-01-01T00:02:00.000Z', Date.parse('2020-01-01T00:00:00.000Z')), undefined);
+  assert.equal(staleAge('not a date'), undefined);
+  // Fixture records are fetched at 2020-01-01; build the graph just past the cap.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2020-01-01T00:00:00.000Z') + MAX_STALE_MS + 1 });
+  const { service, provider, directory } = await setup(t);
+  provider.citations = async () => { throw new SemanticScholarError(429, undefined, 60); };
+  await service.graph([id(1)]);
+  t.mock.timers.tick(60001);
+  provider.getPaper = async () => { throw new SemanticScholarError(500); };
+  const restartedCache = new PersistentCache(directory);
+  const stale = await new SemanticService(restartedCache, false, provider).graph([id(1)]);
+  assert.ok(await restartedCache.get(`s2:graph:v1:${id(1)}`, true), 'The stale graph is still cached');
+  assert.doesNotMatch(stale.meta.warning!, /stale cached graph/);
+  assert.match(stale.meta.warning!, /stale\/local data used/);
 });
 
 test('expired partial graph rejects a genuine origin 404 even when transport lease release fails', async t => {

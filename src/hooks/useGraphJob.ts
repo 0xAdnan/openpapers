@@ -133,14 +133,17 @@ export default function useGraphJob(origins: string[], enabled = true) {
     return () => { controller.abort(); clearTimeout(timer); };
   }, [key, id, watching, retry, enabled]);
 
-  async function start(candidateBudget: number) {
-    if (!available || !config || id || submission.current) return false;
+  // A refresh replaces the job in view; the old result stays visible until the new job is accepted.
+  async function start(candidateBudget: number, refresh = false) {
+    if (!available || !config || (id && !refresh) || submission.current) return false;
     if (!Number.isInteger(candidateBudget) || candidateBudget < 40 || candidateBudget > config.candidateBudget) return false;
     const controller = new AbortController();
     submission.current = controller;
-    setState({ key, id: null, creating: true });
+    const previous = refresh ? { key, id, job: current.job } : { key, id: null };
+    setState({ ...previous, creating: true });
     try {
-      const job = parseJob(await requestJson('/api/graph-jobs', controller.signal, { origins: key.split(','), candidateBudget }), key);
+      const job = parseJob(await requestJson('/api/graph-jobs', controller.signal,
+        { origins: key.split(','), candidateBudget, ...(refresh ? { refresh: true } : {}) }), key);
       if (controller.signal.aborted) return false;
       accepted.current = { key, id: job.id, job };
       setState(accepted.current);
@@ -151,7 +154,7 @@ export default function useGraphJob(origins: string[], enabled = true) {
       setWatching(true);
       return true;
     } catch (error) {
-      if (!controller.signal.aborted) setState({ key, id: null, error: error instanceof JobRequestError ? error.message : 'Could not confirm creation of the research job. Check your connection before trying again.' });
+      if (!controller.signal.aborted) setState({ ...previous, error: error instanceof JobRequestError ? error.message : 'Could not confirm creation of the research job. Check your connection before trying again.' });
       return false;
     } finally { if (submission.current === controller) submission.current = null; }
   }
@@ -168,6 +171,7 @@ export default function useGraphJob(origins: string[], enabled = true) {
     config: enabled ? config : undefined, available, id, job: current.job, error: current.error, creating: Boolean(current.creating), watching: enabled && watching,
     result: current.job?.state === 'completed' ? current.job.result : null,
     start, forget, stopWatching: () => setWatching(false),
+    refresh: () => current.job && config ? start(Math.min(current.job.candidateBudget, config.candidateBudget), true) : Promise.resolve(false),
     resume: () => { setWatching(true); setRetry(value => value + 1); },
   };
 }

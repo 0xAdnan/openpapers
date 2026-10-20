@@ -94,7 +94,7 @@ if (process.argv[2] === '--s2-worker') {
         await migrateGraphJobs(databaseUrl);
         await migrateGraphJobs(databaseUrl);
         assert.equal((await sql.query(`SELECT count(*)::integer AS count FROM pg_tables
-          WHERE schemaname = 'openpapers'`)).rows[0].count, 7);
+          WHERE schemaname = 'openpapers'`)).rows[0].count, 8);
         assert.equal((await sql.query('SELECT count(*)::integer AS count FROM openpapers.schema_migrations')).rows[0].count, 1);
         directory = await mkdtemp(join(tmpdir(), 's2-postgres-workers-'));
         workerPath = join(directory, 'worker.mts');
