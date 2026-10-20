@@ -183,6 +183,7 @@ test('PostgreSQL durable Semantic Scholar cache', { skip: !process.env.GRAPH_TES
   const root = new URL(process.env.GRAPH_TEST_DATABASE_URL!);
   assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(root.hostname), 'Only explicitly supplied local disposable PostgreSQL is allowed');
   const admin = new pg.Pool(graphPostgresPoolConfig(root.href, { max: 1 }));
+  admin.on('error', () => {});
   const databaseName = `s2_cache_${randomUUID().replaceAll('-', '')}`;
   let owned = false, sql: pg.Pool | undefined;
   const caches: PersistentSemanticCache[] = [];
@@ -196,6 +197,7 @@ test('PostgreSQL durable Semantic Scholar cache', { skip: !process.env.GRAPH_TES
   await admin.query(`CREATE DATABASE "${databaseName}" TEMPLATE template0`); owned = true;
   root.pathname = `/${databaseName}`;
   sql = new pg.Pool(graphPostgresPoolConfig(root.href, { max: 2 }));
+  sql.on('error', () => {});
   await migrateGraphJobs(root.href); await migrateGraphJobs(root.href);
   async function cache(context: TestContext) {
     const result = new PersistentSemanticCache(await directory(context), root.href);
