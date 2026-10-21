@@ -401,20 +401,27 @@ test('OpenAlex-only configuration hides source selectors and resets legacy searc
 
   // A full navigation exercises configuration loading, not just an in-app source change.
   await page.goto('/about');
+  await expect(page.getByRole('button', { name: 'Submit search', exact: true })).toBeEnabled();
   const requestsBeforeConfig = diagnostics.searchRequests.length;
   let releaseConfig!: () => void;
   const configReleased = new Promise<void>(resolve => { releaseConfig = resolve; });
+  let configHeld!: () => void;
+  const configIntercepted = new Promise<void>(resolve => { configHeld = resolve; });
+  // Hold every request in this phase: a late/duplicate request must not consume a one-shot route.
   await page.route('**/api/providers', async route => {
     const response = await route.fetch();
+    configHeld();
     await configReleased;
     await route.fulfill({ response });
-  }, { times: 1 });
+  });
   await page.goto('/search?q=learning&page=2&provider=semantic-scholar');
+  await configIntercepted;
   await expect(page.getByRole('button', { name: 'Build a graph', exact: true })).toBeDisabled();
   await expect(page.locator('main .loading-state')).toContainText('Searching the literature');
   await page.locator('.header-search').getByRole('textbox', { name: 'Search academic papers' }).fill('learning');
   // Allow the 400 ms autocomplete debounce to expire while configuration is withheld.
   await page.waitForTimeout(600);
+  await expect(page.getByRole('button', { name: 'Build a graph', exact: true })).toBeDisabled();
   expect(diagnostics.searchRequests).toHaveLength(requestsBeforeConfig);
   await expect(page.locator('select')).toHaveCount(0);
   releaseConfig();
