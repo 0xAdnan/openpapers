@@ -31,6 +31,8 @@ export const test = base.extend<{ diagnostics: Diagnostics }>({
     const consoleErrors: { text: string; url: string }[] = [];
     const httpErrors: { status: number; url: string }[] = [];
     const networkErrors: string[] = [];
+    // Analytics is external to the app workflows; keep these offline tests deterministic.
+    await page.route('https://www.googletagmanager.com/gtag/js?*', route => route.fulfill({ contentType: 'application/javascript', body: '' }));
     await page.addInitScript(() => {
       window.cspViolations = [];
       document.addEventListener('securitypolicyviolation', event => {

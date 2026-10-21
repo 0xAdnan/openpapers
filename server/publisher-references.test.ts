@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { PersistentCache } from './cache.ts';
 import { OpenAlexProvider, type OpenAlexWork } from './openalex.ts';
@@ -13,7 +15,7 @@ const record = { DOI: '10.1234/origin', title: ['Synthetic new repair paper'],
   reference: [{ DOI: '10.1234/ref' }, { DOI: '10.1234/ref' }, { DOI: '10.1234/missing' }, { unstructured: 'Not guessed from text.' }] };
 
 async function setup(t: test.TestContext, message = record) {
-  const directory = await mkdtemp('/tmp/opencode/publisher-test-');
+  const directory = await mkdtemp(join(tmpdir(), 'publisher-test-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const cache = new PersistentCache(directory);
   let crossrefCalls = 0;

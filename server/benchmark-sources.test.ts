@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { BenchmarkSources, documentLinks, verifiedArtifact } from './benchmark-sources.ts';
 import { BenchmarkService } from './benchmarks.ts';
@@ -19,7 +21,7 @@ const record = { id: '10.1234/artifact', attributes: { titles: [{ title: `${pape
 const text = `${paper.title}\nAlice Researcher\n10.1234/source\n\f\n4 Evaluation\n\n4.1 Evaluation setup\n\nWe evaluate on NebulaBench and AuroraSet benchmarks.\n\nWe use 4 Orbit, 8 Comet and 11 Lunar repositories.\n\nReferences\n\n[1] UnusedBench dataset.`;
 const encode = (value: unknown) => new Uint8Array(Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)));
 async function setup(t: test.TestContext, overrides: ConstructorParameters<typeof BenchmarkSources>[1] = {}) {
-  const dir = await mkdtemp('/tmp/opencode/benchmark-sources-test-'); t.after(() => rm(dir, { recursive: true, force: true }));
+  const dir = await mkdtemp(join(tmpdir(), 'benchmark-sources-test-')); t.after(() => rm(dir, { recursive: true, force: true }));
   const cache = new PersistentCache(dir); const calls: string[] = [];
   const sources = new BenchmarkSources(cache, { download: async url => {
     calls.push(url.href);

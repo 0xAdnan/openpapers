@@ -2,6 +2,7 @@ import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { BenchmarkQuerySchema, BenchmarkResponseSchema, PaperBenchmarksResponseSchema, benchmarkEvidence, resolveBenchmark, type BenchmarkQuery } from '../shared/benchmarks.ts';
 import { discoverBenchmarks } from '../shared/benchmark-discovery.ts';
 import { BenchmarkSources } from './benchmark-sources.ts';
@@ -30,7 +31,7 @@ const records = [
 const query = (input: Partial<BenchmarkQuery> = {}) => BenchmarkQuerySchema.parse({ q: 'Defects4J', ...input });
 
 async function setup(t: TestContext, fetcher?: typeof fetch) {
-  const directory = await mkdtemp(join('/tmp/opencode', 'benchmark-test-'));
+  const directory = await mkdtemp(join(tmpdir(), 'benchmark-test-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const cache = new PersistentCache(directory);
   const provider = new OpenAlexProvider({ cache, fetch: fetcher ?? (async () => Response.json({ results: records, meta: { count: 45 } })) });

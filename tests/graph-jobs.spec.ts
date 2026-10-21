@@ -183,10 +183,13 @@ test.describe('Graph jobs UI integration fixtures (not research metadata)', () =
     await page.clock.fastForward(60000);
     expect(gets).toBe(hiddenGets);
     await expect(page).toHaveURL(url => url.searchParams.get('job') === JOB_ID);
+    const resumedResponse = page.waitForResponse(response => new URL(response.url()).pathname === jobPath);
     await banner(page).getByRole('button', { name: 'Resume updates', exact: true }).click();
+    await resumedResponse;
     await expect.poll(() => gets).toBeGreaterThan(hiddenGets);
     await page.getByRole('link', { name: 'Open Papers home', exact: true }).click();
     await expect(page).toHaveURL(/\/(?:#main)?$/);
+    await expect(banner(page)).toHaveCount(0);
     const awayGets = gets;
     await page.clock.fastForward(60000);
     expect(gets).toBe(awayGets);

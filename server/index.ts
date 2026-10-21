@@ -180,7 +180,10 @@ export function createApp(options: { service?: PaperService; semanticService?: S
     if (!res.writableEnded && !res.destroyed) res.json({ ...response, meta: { ...response.meta, provider: selected } });
   }));
   app.get('/api/benchmarks/papers', route(async (req, res, signal) => {
-    const parsed = BenchmarkQuerySchema.safeParse(req.query);
+    // Vercel appends the matched rewrite segment as `path`; it is not a user filter.
+    const query = { ...req.query };
+    if (process.env.VERCEL === '1' && query.path === 'benchmarks/papers') delete query.path;
+    const parsed = BenchmarkQuerySchema.safeParse(query);
     if (!parsed.success) throw new ApiError(400, 'Invalid benchmark or filters. Use a benchmark name, page 1–100, and years 1900–2100 in ascending order.');
     const response = await benchmarks.search(parsed.data, signal);
     if (!res.writableEnded && !res.destroyed) res.json(response);

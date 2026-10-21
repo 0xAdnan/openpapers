@@ -41,6 +41,8 @@ to verify interaction contracts, not publication identity or scholarly relevance
 Benchmark workflow tests use explicitly synthetic intercepted responses to test UI
 states independently of provider availability, plus a real offline API coverage
 test. These fixtures are not evidence of actual benchmark usage or paper rankings.
+The external Google Analytics script is replaced with an empty response in browser
+tests; application API responses, CSP checks, and runtime-error checks remain active.
 The configuration-loading regression delays an actual backend response without
 changing its content. Every ordinary browser search must explicitly use OpenAlex.
 Live keyed Semantic Scholar search and multi-source selection are not exercised here.

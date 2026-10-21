@@ -6,6 +6,28 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './index.ts';
 
+test('Vercel rewrite metadata does not become a benchmark filter; other unknown filters remain invalid', async t => {
+  const previous = process.env.VERCEL;
+  process.env.VERCEL = '1';
+  t.after(() => { if (previous === undefined) delete process.env.VERCEL; else process.env.VERCEL = previous; });
+  const directory = await mkdtemp(join(tmpdir(), 'openpapers-rewrite-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { app } = createApp({ offline: true, cacheDirectory: directory });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const origin = `http://127.0.0.1:${address.port}`;
+  const response = await fetch(`${origin}/api/benchmarks/papers?q=Defects4J&path=benchmarks/papers`);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).benchmark.name, 'Defects4J');
+  for (const extra of ['unknown=value', 'path=other', 'q=another']) {
+    const invalid = await fetch(`${origin}/api/benchmarks/papers?q=Defects4J&${extra}`);
+    assert.equal(invalid.status, 400);
+  }
+});
+
 test('serverless cache path and snapshot override serve bundled API and bound serialized responses', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'openpapers-deployment-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

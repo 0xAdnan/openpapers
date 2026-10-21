@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { type lookup } from 'node:dns';
@@ -19,7 +21,7 @@ const text = `Synthetic PDF repair paper\nArticle DOI: 10.1234/origin\nBody cite
 const ref = { id: 'https://openalex.org/W1', doi: 'https://doi.org/10.1234/ref', display_name: 'Synthetic cited study', publication_year: 2020 };
 
 async function setup(t: test.TestContext) {
-  const directory = await mkdtemp('/tmp/opencode/pdf-test-');
+  const directory = await mkdtemp(join(tmpdir(), 'pdf-test-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const cache = new PersistentCache(directory);
   let downloads = 0;
