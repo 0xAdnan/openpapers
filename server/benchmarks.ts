@@ -18,7 +18,7 @@ export class BenchmarkService {
 
   async inPaper(response: { paper: Paper; meta: DataMeta }, signal?: AbortSignal): Promise<PaperBenchmarksResponse> {
     signal?.throwIfAborted();
-    const key = `paper-benchmarks:v5:${createHash('sha256').update(JSON.stringify(response.paper)).digest('hex')}`;
+    const key = `paper-benchmarks:v6:${createHash('sha256').update(JSON.stringify(response.paper)).digest('hex')}`;
     const entry = await this.service.cache.get<unknown>(key);
     const cached = PaperBenchmarksResponseSchema.safeParse(entry?.value);
     signal?.throwIfAborted();

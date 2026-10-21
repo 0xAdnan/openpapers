@@ -223,6 +223,26 @@ test('by-paper empty metadata and request errors offer honest, recoverable state
   expect(attempts).toBe(2);
 });
 
+test('by-paper parenthesized benchmark versions render source evidence rather than an empty state', async ({ page }) => {
+  const paper = { ...papers[0], title: 'UI fixture: Versioned benchmark evaluation', pdfUrl: null,
+    abstract: 'Evaluations on two popular benchmarks (OrbitSet V1.2 and V2.0) demonstrate effectiveness. Synthetic UI fixture, not a real publication.' };
+  await page.route(`**/api/paper/${paper.id}/benchmarks`, async route => {
+    const body: PaperBenchmarksResponse = { paper, benchmarks: discoverBenchmarks({ kind: 'abstract', text: paper.abstract, url: paper.url }),
+      coverage: metadataCoverage, meta: { provider: 'openalex', source: 'live', fetchedAt: '2026-10-21T09:00:00Z' } };
+    await route.fulfill({ json: body });
+  });
+  await page.goto(`/benchmarks/paper?q=Versioned+evaluation&id=${paper.id}`);
+  await expect(page.getByRole('heading', { name: '2 benchmarks and evaluation suites', exact: true })).toBeVisible();
+  await expect(page.locator('.paper-benchmark-card')).toHaveCount(2);
+  for (const name of ['OrbitSet V1.2', 'OrbitSet V2.0']) {
+    const card = page.locator('.paper-benchmark-card').filter({ has: page.getByRole('heading', { name, exact: true }) });
+    await expect(card).toContainText('Evaluations on two popular benchmarks (OrbitSet V1.2 and V2.0)');
+    await expect(card.getByRole('link', { name: 'View evidence' })).toHaveAttribute('href', paper.url);
+    await expect(card.getByRole('link', { name: 'Availability', exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByRole('heading', { name: 'No benchmarks found in available data', exact: true })).toHaveCount(0);
+});
+
 test('uncatalogued suites show full-text evidence, artifact availability and no misleading name search', async ({ page }, testInfo) => {
   const paper = { ...papers[0], title: 'UI fixture: Partial repair abstract', abstract: 'Synthetic partial abstract without benchmark names.' };
   await page.route(`**/api/paper/${paper.id}/benchmarks`, async route => {

@@ -11,8 +11,30 @@ const resource = /\b(?:benchmarks?|datasets?|data sets?|corpora|corpus|test suit
 const namedResource = /\b(?:benchmarks?|datasets?|data sets?|corpora|corpus|test suites?|evaluation suites?)\b/i;
 const usage = /\b(?:we (?:use|used|evaluate|evaluated|test|tested|assess|compare|select|collect|construct|build|create)|(?:evaluat\w*|experiment\w*|test\w*) (?:on|using|with)|our (?:evaluation|experiments|dataset)|(?:benchmark|dataset) repositor|(?:artifact|package) (?:includes|contains))\b/i;
 const token = '[\\p{L}][\\p{L}\\p{N}_+/-]*';
-const nameToken = (value: string) => /^[\p{Lu}][\p{L}\p{N}_+./-]*$/u.test(value) || /[\p{L}][\p{Lu}\p{N}]/u.test(value);
+const nameToken = (value: string) => /^[\p{L}][\p{L}\p{N}_+./-]*$/u.test(value) && (/^\p{Lu}/u.test(value) || /[\p{L}][\p{Lu}\p{N}]/u.test(value));
 const generic = /^(?:the|our|this|existing|public|standard|new|a|an|all|both|real|world|open|source|synthetic)$/i;
+const version = /^(?:v\d+(?:\.\d+)*|\d+(?:\.\d+)+)$/i;
+
+/** An omitted name may share only an explicit version's immediately preceding base name. */
+function parenthesizedNames(value: string): string[] {
+  const names: string[] = [];
+  let base = '';
+  for (const item of value.replace(/\s*\[\d+(?:[,–-]\d+)*\]/g, '').split(/,|\band\b|\bor\b/i)) {
+    if (!item.trim()) continue;
+    const words = item.trim().replace(/\s+(?:datasets?|benchmarks?)$/i, '').split(/\s+/);
+    if (words.length === 1 && version.test(words[0])) {
+      if (base) names.push(`${base} ${words[0]}`);
+      continue;
+    }
+    const qualifier = version.test(words.at(-1)!) ? words.pop() : undefined;
+    if (!words.length || words.length > 5 || !words.every(nameToken) || words.every(word => generic.test(word))) {
+      base = ''; continue;
+    }
+    base = qualifier ? words.join(' ') : '';
+    names.push([...words, ...(qualifier ? [qualifier] : [])].join(' '));
+  }
+  return names;
+}
 
 /** Extract source-backed candidates, without benchmark names, URLs, or paper-specific cases. */
 export function discoverBenchmarks(source: BenchmarkText): PaperBenchmarksResponse['benchmarks'] {
@@ -78,13 +100,18 @@ export function discoverBenchmarks(source: BenchmarkText): PaperBenchmarksRespon
         }
       }
       for (const match of sentence.matchAll(/\b(?:datasets?|benchmarks?|corpus|test suite)\s+(?:named|called)?\s*["“']([^"”']{2,160})["”']/gi)) add(match[1], 'named');
+      // "two popular benchmarks (Foo V1.2 and V2.0)": retain the stated versions, never standalone version names.
+      for (const match of sentence.matchAll(/\b(?:datasets?|benchmarks?|data sets?|corpora|corpus|test suites?|evaluation suites?)\s*\(([^()]{1,220})\)/gi)) {
+        for (const name of parenthesizedNames(match[1])) add(name, 'named');
+      }
       // Names appearing as objects of an evaluation/use clause; no fixed vocabulary of names.
       const list = /\b(?:on|using|use|used|with)\s+(?:the\s+)?(?:(?:datasets?|benchmarks?)\s*[:—-]?\s*)?([^;]{1,220})/gi;
-      for (const match of sentence.matchAll(list)) {
+      // Parenthesized resources are handled above; do not leak their fragments into the bare-name parser.
+      for (const match of sentence.replace(/\([^()]*\)/g, '').matchAll(list)) {
         const candidate = match[1].replace(/\s*\[\d+(?:[,–-]\d+)*\]/g, '').replace(/\s+(?:with|for|to|across|spanning|which|that|where|as|from|and compare)\b.*$/i, '');
         for (const item of candidate.split(/,|\band\b|\bor\b/)) {
           const words = item.trim().replace(/^(?:the|both)\s+/i, '').replace(/[.!?]+$/, '').replace(/\s+(?:datasets?|benchmarks?)\b.*$/i, '').split(/\s+/);
-          if (words.length > 5 || !words.every(nameToken)) continue;
+          if (words.length > 5 || !words.every(nameToken) || words.every(word => version.test(word))) continue;
           const name = words.join(' ');
           if (!name || words.every(word => generic.test(word))) continue;
           // Require a benchmark/data noun in the clause; a bare "with ToolName" isn't a dataset.

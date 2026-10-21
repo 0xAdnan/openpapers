@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { BenchmarkSources, documentLinks, verifiedArtifact } from './benchmark-sources.ts';
 import { BenchmarkService } from './benchmarks.ts';
@@ -45,6 +46,56 @@ test('new names, quoted lowercase datasets and custom counted suites are discove
   assert.deepEqual(suites.map(b => b.name).sort(), ['11 Lunar repositories', '4 Orbit repositories', '8 Comet repositories']);
   const different = discoverBenchmarks({ kind: 'abstract', text: 'We use 10 training projects and 10 testing projects.', url: paper.url });
   assert.deepEqual(different.map(b => b.name), ['10 training projects', '10 testing projects']);
+});
+
+test('quantified parenthesized benchmark lists preserve names and shared version qualifiers', () => {
+  const abstract = 'Evaluations on two popular benchmarks (Defects4J V1.2 and V2.0) demonstrate the effectiveness of our approach over SOTA baselines.';
+  const results = discoverBenchmarks({ kind: 'abstract', text: abstract, url: paper.url });
+  assert.deepEqual(results.map(b => b.name), ['Defects4J V1.2', 'Defects4J V2.0']);
+  assert.ok(results.every(b => b.category === 'named' && b.url === null && b.evidence.excerpt === abstract));
+  for (let n = 1; n <= 10; n++) {
+    const text = `We evaluate on two popular benchmarks (FreshBench${n} and NovelSet${n}).`;
+    assert.deepEqual(discoverBenchmarks({ kind: 'abstract', text, url: paper.url }).map(b => b.name), [`FreshBench${n}`, `NovelSet${n}`]);
+  }
+  for (const text of [
+    'We evaluate using the dataset (OrbitSet v1.2, v2.0, and v3.1).',
+    'We evaluate on the benchmark (OrbitSet 1.2 and 2.0).',
+  ]) {
+    const results = discoverBenchmarks({ kind: 'abstract', text, url: paper.url });
+    assert.ok(results.every(b => b.name.startsWith('OrbitSet ')));
+    assert.equal(results.length, text.includes('v3.1') ? 3 : 2);
+  }
+});
+
+test('parenthesized text does not turn tools, bare versions or citations into benchmark names', () => {
+  for (const text of [
+    'We evaluate on benchmarks (V1.2 and V2.0).',
+    'We evaluate on benchmarks (see Table 2).',
+    'We evaluate on benchmarks (146 bugs).',
+    'We evaluate using ToolName (with HelperName).',
+    'We do not use benchmarks (GhostBench and PhantomSet).',
+    'Future work will evaluate on benchmarks (GhostBench and PhantomSet).',
+    '2 Related work\nOther authors evaluate on benchmarks (GhostBench and PhantomSet).\n\n3 Conclusion',
+    'References\n[1] Evaluations on benchmarks (GhostBench and PhantomSet).',
+  ]) assert.deepEqual(discoverBenchmarks({ kind: 'fulltext', text, url: paper.url }), [], text);
+  const text = 'We evaluate on two benchmarks (OrbitSet V1.2 and LunarSet V2.0) and compare with ToolName.';
+  assert.deepEqual(discoverBenchmarks({ kind: 'abstract', text, url: paper.url }).map(b => b.name), ['OrbitSet V1.2', 'LunarSet V2.0']);
+});
+
+test('paper discovery retains parenthesized abstract evidence even when all remote sources fail', async t => {
+  const f = await setup(t, { download: async () => { throw new Error('Outage'); }, downloadPdf: async () => { throw new Error('Outage'); } });
+  const input = { ...paper, abstract: 'Evaluations on two popular benchmarks (OrbitSet V1.2 and V2.0) demonstrate effectiveness.' };
+  const service = new PaperService(f.cache, false); await service.ready;
+  const benchmarks = new BenchmarkService(service, { sources: f.sources });
+  const meta = { source: 'live' as const, provider: 'openalex' as const, fetchedAt: new Date().toISOString() };
+  // An older parser's empty result must not survive the extractor revision.
+  await f.cache.set(`paper-benchmarks:v5:${createHash('sha256').update(JSON.stringify(input)).digest('hex')}`, {
+    paper: input, meta, benchmarks: [], coverage: { fields: ['title', 'abstract'], discovery: { status: 'complete', sources: [], limitations: 'Old parser fixture.' } },
+  });
+  const result = PaperBenchmarksResponseSchema.parse(await benchmarks.inPaper({ paper: input, meta }));
+  assert.deepEqual(result.benchmarks.map(b => b.name), ['OrbitSet V1.2', 'OrbitSet V2.0']);
+  assert.ok(result.benchmarks.every(b => b.evidence.kind === 'abstract' && b.evidence.sourceUrl === input.url && b.url === null));
+  assert.equal(result.coverage.discovery.status, 'unavailable');
 });
 
 test('related work, bibliography, negation, framework qualifiers and code are not benchmark evidence', () => {
