@@ -60,6 +60,15 @@ test('citation-only edges stay dashed and never become a similarity step', async
   await expect(page.getByRole('region', { name: 'How to read the graph', exact: true })).toContainText('Citation-only dashed lines are excluded from similarity paths.');
 });
 
+test('singleton graphs explain missing connections without blaming rendering or filters', async ({ page }) => {
+  await relationGraph(page, [paper('W1199', [], 1, true)], []);
+  await expect(nodes(page)).toHaveCount(1);
+  const notice = page.getByRole('region', { name: 'Limited graph connections', exact: true });
+  await expect(notice).toContainText('No indexed connections available');
+  await notice.getByRole('button', { name: 'Review coverage', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Data & coverage', exact: true })).toContainText('Not a real literature graph.');
+});
+
 test('a zero-score indirect neighbor has no route through a citation bridge but retains a real similarity route', async ({ page }) => {
   const origin = paper('W1201', ['W1202'], 1, true), bridge = paper('W1202'), indirect = paper('W1203');
   const graph = await relationGraph(page, [origin, bridge, indirect], [edge(origin.id, bridge.id), edge(bridge.id, indirect.id, 0.3)]);

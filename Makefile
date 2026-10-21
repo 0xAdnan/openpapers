@@ -35,7 +35,7 @@ frontend:
 	$(NPM) exec vite -- --host 0.0.0.0
 
 backend:
-	$(NODE) --env-file-if-exists=.env --import tsx server/index.ts
+	$(NODE) --env-file-if-exists=.env --watch --import tsx server/index.ts
 
 worker:
 	$(NPM) run graph:worker

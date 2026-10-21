@@ -29,8 +29,18 @@ Unset any inherited `S2_API_KEY` before running, for example
 - Delayed real provider configuration blocks results and header autocomplete requests until OpenAlex is available; no S2 request escapes during recovery.
 - OpenAlex autocomplete, submit/see-all links, pagination, and mobile keyboard search with no S2 search requests.
 - Same-source combined graph enforcement and source-correct S2 BibTeX/CSV exports from synthetic saved records.
+- Benchmark request parsing, newest/oldest/citation sorting, pagination, publication/year/access/PDF/evidence/keyword filters, URL restoration, library saves, retries, and mobile layout.
+- By-paper selection, arbitrary named benchmark/custom-suite evidence, source-backed availability, missing links, incomplete metadata, recoverable failures, and desktop/mobile layout.
+- Source discovery fixtures cover unseen names, evaluation sections, bibliography/related-work exclusion, verified artifact and PDF identities, source caching, deadlines, shared cancellation, offline behavior, and relative/private link handling. No real paper-specific detection rules are bundled.
+- Singleton graphs disclose missing connection data and provide a coverage action; publisher/PDF recovery is verified with isolated backend transport fixtures.
+- PDF reference tests cover exact DOI and title/year/author matching, conflicting/ambiguous identities, old empty-pool upgrades, caching, cancellation and offline behavior. A generated synthetic PDF exercises the production parser worker; transport fixtures cover DNS pinning, private/mixed DNS, redirects, size limits and invalid PDF signatures. No publisher PDF is bundled.
 
-All normal workflow tests use actual application responses, not API or UI mocks.
+Core graph/search workflow tests use actual application responses, not API or UI mocks.
+Graph-relation, graph-fallback and job-state tests use labelled synthetic projections
+to verify interaction contracts, not publication identity or scholarly relevance.
+Benchmark workflow tests use explicitly synthetic intercepted responses to test UI
+states independently of provider availability, plus a real offline API coverage
+test. These fixtures are not evidence of actual benchmark usage or paper rankings.
 The configuration-loading regression delays an actual backend response without
 changing its content. Every ordinary browser search must explicitly use OpenAlex.
 Live keyed Semantic Scholar search and multi-source selection are not exercised here.

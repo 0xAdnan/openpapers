@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { GraphResponseSchema } from '../shared/schemas.ts';
 import type { GraphResponse, Paper } from '../shared/types.ts';
 import { PersistentCache } from './cache.ts';
@@ -86,6 +87,36 @@ test('healthy OA graph makes exactly one OA graph call and no other calls', asyn
   assert.deepEqual(f.calls.oaGraph, [['W1']]);
   assert.deepEqual(f.calls.oaPaper, []);
   noSemanticCalls(f.calls);
+});
+
+test('optional fallback has a short deadline, cancels real work and cools down repeated sparse requests', async () => {
+  const f = setup();
+  let active = 0;
+  f.handlers.search = async (_q, _page, signal) => {
+    active++;
+    try { await delay(10000, undefined, { signal }); }
+    finally { active--; }
+    throw new Error('unreachable');
+  };
+  const coordinator = new GraphFallbackCoordinator(f.openalex, f.semantic, true, { timeoutMs: 30 });
+  const start = Date.now();
+  assert.strictEqual(await coordinator.graph(['W1']), f.original);
+  assert.ok(Date.now() - start < 500);
+  assert.equal(active, 0);
+  assert.strictEqual(await coordinator.graph(['W1']), f.original);
+  assert.equal(f.calls.search.length, 1, 'do not retry a slow optional provider on every graph visit');
+});
+
+test('successful fallback reuses resolved identity until the original graph changes', async () => {
+  const f = setup();
+  const first = await f.coordinator.graph(['W1']);
+  assert.equal((await f.coordinator.graph(['W1'])).meta.provider, 'semantic-scholar');
+  assert.equal(f.calls.search.length, 1);
+  assert.equal(f.calls.s2Graph.length, 1);
+  f.handlers.oaGraph = async () => ({ ...f.original, meta: { ...f.original.meta, fetchedAt: new Date().toISOString() } });
+  await f.coordinator.graph(['W1']);
+  assert.equal(f.calls.search.length, 2, 'changed input coverage must not reuse the old comparison');
+  assert.equal(first.meta.source, 'cache');
 });
 
 for (const size of [1, 2, 3]) test(`OA with ${size} displayed nodes is eligible, even with edges`, async () => {
@@ -597,7 +628,7 @@ for (const stage of ['oaGraph', 'oaPaper', 'search', 'raw', 's2Graph'] as const)
     f.handlers[stage] = async () => { controller.abort(reason); throw new ApiError(503, 'Failure after abort'); };
     await assert.rejects(f.coordinator.graph(['W1'], controller.signal), e => e === reason);
     assert.equal(f.calls.oaGraph.length, 1);
-    assert.ok(f.calls.signals.every(signal => signal === controller.signal));
+    assert.ok(f.calls.signals.every(signal => signal?.aborted && signal.reason === reason), 'combined deadlines retain caller cancellation');
     if (stage === 'oaGraph' || stage === 'oaPaper') noSemanticCalls(f.calls);
     if (stage === 'search' || stage === 'raw') assert.deepEqual(f.calls.s2Graph, []);
   });
@@ -639,7 +670,7 @@ test('repeated calls use service seams without mutating or caching fallback as a
   const first = await f.coordinator.graph(['W1']), second = await f.coordinator.graph(['W1']);
   assert.deepEqual(first, second);
   assert.equal(f.calls.oaGraph.length, 2);
-  assert.equal(f.calls.s2Graph.length, 2);
+  assert.equal(f.calls.s2Graph.length, 1);
   assert.equal(f.original.meta.provider, 'openalex');
   assert.equal(f.original.meta.fallback, undefined);
   assert.equal(f.alternative.meta.fallback, undefined);

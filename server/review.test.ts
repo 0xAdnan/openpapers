@@ -297,6 +297,28 @@ test('collection provenance follows returned objects despite concurrent calls an
   assert.equal(result.fetchedAt, oldTime);
 });
 
+test('independent graph candidate acquisitions overlap but settle before returning on cancellation', async t => {
+  const { cache } = await setup(t);
+  const provider = new OpenAlexProvider({ cache });
+  let finish!: () => void, calls = 0;
+  const blocked = new Promise<void>(resolve => { finish = resolve; });
+  provider.batch = async () => { calls++; await blocked; return []; };
+  provider.request = async <T extends WorksPage | OpenAlexWork>() => {
+    calls++; await blocked;
+    const page: WorksPage = { results: [], meta: { count: 0 } };
+    return page as T;
+  };
+  const controller = new AbortController();
+  const operation = collectCandidates(provider, { ...work('W1'), referenced_works: ['https://openalex.org/W2'] }, controller.signal);
+  const rejected = assert.rejects(operation, /User navigation/);
+  await Promise.resolve();
+  assert.equal(calls, 3, 'reference hydration, origin citers and shared-reference citers start independently');
+  controller.abort(new Error('User navigation'));
+  finish();
+  await rejected;
+  assert.equal(calls, 3, 'no common-reference hydration after cancellation');
+});
+
 test('real empty live page retains provenance after the provider log reaches its 250-entry cap', async t => {
   const { cache } = await setup(t);
   const key = `oa:/works/W1?select=${encodeURIComponent(SELECT)}`;

@@ -14,6 +14,8 @@ import { z } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
 import { OpenAlexProvider } from './openalex.ts';
 import { GraphFallbackCoordinator } from './graph-fallback.ts';
+import { BenchmarkService } from './benchmarks.ts';
+import { BenchmarkQuerySchema } from '../shared/benchmarks.ts';
 
 export function createApp(options: { service?: PaperService; semanticService?: SemanticService; defaultProvider?: ProviderId; offline?: boolean; rateLimit?: number; distPath?: string; requestTimeoutMs?: number; cacheDirectory?: string; snapshotPath?: string; maxResponseBytes?: number; jobStore?: GraphJobStore; jobRunner?: GraphJobRunner; background?: (task: Promise<unknown>) => void } = {}) {
   const offline = options.offline ?? /^(1|true)$/i.test(process.env.OFFLINE ?? '');
@@ -22,6 +24,7 @@ export function createApp(options: { service?: PaperService; semanticService?: S
     ? new PersistentSemanticCache(cacheDirectory, process.env.DATABASE_URL) : new PersistentCache(cacheDirectory);
   const service = options.service ?? new PaperService(cache, offline, undefined, options.snapshotPath);
   const semanticService = options.semanticService ?? new SemanticService(cache, offline);
+  const benchmarks = new BenchmarkService(service);
   const jobStore = options.jobStore ?? (process.env.DATABASE_URL && !offline ? new PostgresGraphStore() : undefined);
   const jobRunner = options.jobRunner ?? (jobStore ? new GraphJobRunner(jobStore,
     new OpenAlexProvider({ cache, apiKey: process.env.PAPERS_API_KEY, maxRequests: 1500 })) : undefined);
@@ -176,6 +179,12 @@ export function createApp(options: { service?: PaperService; semanticService?: S
     const response = await (selected === 'semantic-scholar' ? semanticService : service).search(q, Number(raw), signal);
     if (!res.writableEnded && !res.destroyed) res.json({ ...response, meta: { ...response.meta, provider: selected } });
   }));
+  app.get('/api/benchmarks/papers', route(async (req, res, signal) => {
+    const parsed = BenchmarkQuerySchema.safeParse(req.query);
+    if (!parsed.success) throw new ApiError(400, 'Invalid benchmark or filters. Use a benchmark name, page 1–100, and years 1900–2100 in ascending order.');
+    const response = await benchmarks.search(parsed.data, signal);
+    if (!res.writableEnded && !res.destroyed) res.json(response);
+  }));
   app.get('/api/graph', route(async (req, res, signal) => {
     const raw = scalar(req.query.ids, 'origin IDs', 131);
     const ids = raw.split(',');
@@ -196,6 +205,16 @@ export function createApp(options: { service?: PaperService; semanticService?: S
     if (selector(req.query.provider, selected) !== selected) throw new ApiError(400, 'Provider does not match the paper ID');
     const response = await (selected === 'semantic-scholar' ? semanticService : service).paper(id, signal);
     if (!res.writableEnded && !res.destroyed) res.json({ ...response, meta: { ...response.meta, provider: selected } });
+  }));
+  app.get('/api/paper/:id/benchmarks', route(async (req, res, signal) => {
+    const id = scalar(req.params.id, 'paper ID', 43);
+    if (!PAPER_ID_PATTERN.test(id)) throw new ApiError(400, 'Invalid paper ID');
+    const selected = paperProvider(id);
+    if (selector(req.query.provider, selected) !== selected) throw new ApiError(400, 'Provider does not match the paper ID');
+    const response = await (selected === 'semantic-scholar' ? semanticService : service).paper(id, signal);
+    signal.throwIfAborted();
+    const body = await benchmarks.inPaper({ ...response, meta: { ...response.meta, provider: selected } }, signal);
+    if (!res.writableEnded && !res.destroyed) res.json(body);
   }));
   app.use('/api', (_req, res) => { res.status(404).json({ error: 'API route not found' }); res.locals.release(); });
   const dist = options.distPath ?? fileURLToPath(new URL('../dist/', import.meta.url));

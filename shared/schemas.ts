@@ -27,6 +27,7 @@ export const ExamplesSchema = z.array(z.object({ id, title: z.string().min(1), f
 export const CandidatePoolSchema = z.object({
   origin: id, papers: z.array(PaperSchema).min(1).max(300), fetchedAt: date,
   source: z.enum(['live', 'cache']), coverage: z.string(), provider: provider.optional(),
+  referenceRecovery: z.enum(['crossref-v1', 'bibliography-v2']).optional(),
 }).refine(pool => pool.papers.some(paper => paper.id === pool.origin) && new Set(pool.papers.map(paper => paper.id)).size === pool.papers.length);
 export const SearchResponseSchema = z.object({
   results: z.array(PaperSchema).max(20), total: count, page: z.number().int().min(1).max(100),

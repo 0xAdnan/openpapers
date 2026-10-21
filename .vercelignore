@@ -6,3 +6,6 @@ test-results
 playwright-report
 node_modules
 .git
+.agents
+.claude
+agent

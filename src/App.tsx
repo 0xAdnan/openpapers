@@ -14,6 +14,8 @@ import GraphShare from './components/GraphShare';
 import { graphShareLink } from '../shared/share-link';
 import useGraphJob from './hooks/useGraphJob';
 import { GRAPH_RESULT_REFRESH_MS } from '../shared/graph-jobs';
+import { BenchmarkQuerySchema, BenchmarkResponseSchema, PaperBenchmarksResponseSchema, type BenchmarkResponse, type PaperBenchmarksResponse } from '../shared/benchmarks';
+import './components/benchmarks.css';
 
 const number = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const exactNumber = new Intl.NumberFormat('en');
@@ -27,7 +29,7 @@ function safeUrl(value: string | null | undefined) {
   try { const url = new URL(value ?? ''); return /^https?:$/.test(url.protocol) ? url.href : undefined; } catch { return undefined; }
 }
 
-function useApi<T>(url: string | null) {
+function useApi<T>(url: string | null, refresh = 0) {
   const [state, setState] = useState<{ url?: string | null; data?: T; error?: string; loading: boolean }>({ loading: Boolean(url) });
   useEffect(() => {
     if (!url) { setState({ url, loading: false }); return; }
@@ -36,7 +38,7 @@ function useApi<T>(url: string | null) {
     fetch(url, { signal: controller.signal }).then(async response => {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || 'Request failed. Please try again.');
-      const schema = url === '/api/providers' ? ProvidersSchema : url.startsWith('/api/graph?') ? GraphResponseSchema : url.startsWith('/api/search?') ? SearchResponseSchema : ExamplesSchema;
+      const schema = url === '/api/providers' ? ProvidersSchema : /^\/api\/paper\/[^/]+\/benchmarks(?:\?|$)/.test(url) ? PaperBenchmarksResponseSchema : url.startsWith('/api/benchmarks/papers?') ? BenchmarkResponseSchema : url.startsWith('/api/graph?') ? GraphResponseSchema : url.startsWith('/api/search?') ? SearchResponseSchema : ExamplesSchema;
       const parsed = schema.safeParse(body);
       if (!parsed.success) throw new Error('The server returned incomplete or invalid paper data. Please try again.');
       return parsed.data as T;
@@ -44,7 +46,7 @@ function useApi<T>(url: string | null) {
       if (!controller.signal.aborted) setState({ url, error: error.message, loading: false });
     });
     return () => controller.abort();
-  }, [url]);
+  }, [url, refresh]);
   // Never expose the previous request's data during a URL/provider change.
   return state.url === url ? state : { loading: Boolean(url) };
 }
@@ -113,6 +115,8 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/search" element={<SearchPage />} />
+      <Route path="/benchmarks" element={<BenchmarkPage />} />
+      <Route path="/benchmarks/paper" element={<PaperBenchmarkPage />} />
       <Route path="/graph/:ids/:view?" element={<Workspace />} />
       <Route path="/library" element={<LibraryPage />} />
       <Route path="/about" element={<About />} />
@@ -137,6 +141,7 @@ function Header() {
     <Brand />
     <div className="header-search"><SearchBox compact /></div>
     <nav className={open ? 'header-nav is-open' : 'header-nav'} aria-label="Main navigation">
+      <NavLink to="/benchmarks" onClick={() => setOpen(false)}><FlaskConical size={17} />Benchmarks</NavLink>
       <NavLink to="/about" onClick={() => setOpen(false)}>About</NavLink>
       <NavLink to="/library" onClick={() => setOpen(false)}><Library size={17} />Library{papers.length > 0 && <span className="count">{papers.length}</span>}</NavLink>
       <GithubStar />
@@ -223,6 +228,11 @@ function Home() {
       <div className="section-top"><h2 id="examples-heading">Or start with one of our example graphs</h2></div>
       <div className="example-grid">{FEATURED.map(example => <Link className="example-card" key={example.id} to={graphUrl([example.id])}><GraphPreview preview={example} /><h3>{example.title} <span className="example-meta">({example.author}, {example.year})</span></h3></Link>)}</div>
     </section>
+    <section className="benchmark-entry content-width" aria-labelledby="benchmark-entry-heading">
+      <FlaskConical size={25} aria-hidden="true" />
+      <div><h2 id="benchmark-entry-heading">Benchmark papers</h2></div>
+      <Link className="secondary" to="/benchmarks">Find benchmark papers <ArrowRight size={17} /></Link>
+    </section>
     <section className="use-cases content-width"><h2>A new perspective on your research</h2><div className="use-case-grid">
       <article><Network size={25} /><h3>Get a visual overview of a field</h3><p>Build a neighborhood around a paper. Similar papers cluster together, helping you see the foundations and directions of a research area.</p></article>
       <article><GitBranch size={25} /><h3>Find the work before and after</h3><p>Explore the references shared by your graph, then discover papers that build on many of those works.</p></article>
@@ -257,9 +267,9 @@ function PaperLinks({ paper, bare = false }: { paper: Paper; bare?: boolean }) {
   return <div className="paper-links">{!bare && <span className="open-in">Open in:</span>}{pdf && <a className="open-icon" href={pdf} target="_blank" rel="noreferrer" aria-label={`PDF for ${paper.title}`} title="PDF"><FileText size={15} /></a>}{doi && <a className="open-icon" href={doi} target="_blank" rel="noreferrer" aria-label={`DOI ${doiIdentifier(paper.doi!)}`} title="DOI"><span className="doi-badge">doi</span></a>}<a className="open-icon" href={providerRecordUrl(paper.id)} target="_blank" rel="noreferrer" aria-label={`Source record for ${paper.title}`} title="Source record"><Globe size={15} /></a><a className="open-icon" href={`https://scholar.google.com/scholar?q=${encodeURIComponent(paper.title)}`} target="_blank" rel="noreferrer" aria-label={`Google Scholar for ${paper.title}`} title="Google Scholar"><GraduationCap size={16} /></a></div>;
 }
 
-function PaperCard({ paper, children }: { paper: Paper; children?: ReactNode }) {
+function PaperCard({ paper, children, detail }: { paper: Paper; children?: ReactNode; detail?: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
-  return <article className="paper-card"><div className="paper-card-top"><Link to={graphUrl([paper.id])}><h2>{paper.title}</h2></Link></div><p className="paper-authors">{authors(paper)}</p><p className="paper-publication">{paper.venue && `${paper.venue} `}{paper.year ?? 'Year unavailable'}{paper.venue ? '.' : ''}</p><p className="paper-stats">{exactNumber.format(paper.citations)} Citations, {paper.references.length} References{paper.openAccess && <span className="oa-label">Open access</span>}</p><div className="paper-card-bottom"><div className="paper-actions"><Link className="open-icon build-icon" to={graphUrl([paper.id])} aria-label="Build graph" title="Build graph"><Network size={16} /></Link><PaperLinks paper={paper} bare /></div><div className="paper-card-actions">{children}<SaveButton paper={paper} /></div></div>{paper.abstract && <div className="abstract-row"><p className={`paper-abstract ${expanded ? 'expanded' : ''}`}>{paper.abstract}</p><button className="show-more" onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Show more'}</button></div>}</article>;
+  return <article className="paper-card"><div className="paper-card-top"><Link to={graphUrl([paper.id])}><h2>{paper.title}</h2></Link></div><p className="paper-authors">{authors(paper)}</p><p className="paper-publication">{paper.venue && `${paper.venue} `}{paper.year ?? 'Year unavailable'}{paper.venue ? '.' : ''}</p><p className="paper-stats">{exactNumber.format(paper.citations)} Citations, {paper.references.length} References{paper.openAccess && <span className="oa-label">Open access</span>}</p>{detail}<div className="paper-card-bottom"><div className="paper-actions"><Link className="open-icon build-icon" to={graphUrl([paper.id])} aria-label="Build graph" title="Build graph"><Network size={16} /></Link><PaperLinks paper={paper} bare /></div><div className="paper-card-actions">{children}<SaveButton paper={paper} /></div></div>{paper.abstract && <div className="abstract-row"><p className={`paper-abstract ${expanded ? 'expanded' : ''}`}>{paper.abstract}</p><button className="show-more" onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Show more'}</button></div>}</article>;
 }
 
 function SearchPage() {
@@ -276,6 +286,155 @@ function SearchPage() {
     {results.length ? results.map(paper => <PaperCard key={paper.id} paper={paper} />) : <div className="empty-state"><Search size={32} /><h2>No matching papers</h2><p>Try a shorter title, a DOI, or an example graph on the homepage. Offline search only includes bundled and previously cached papers.</p></div>}
     {data.total > data.perPage && <nav className="pagination" aria-label="Search result pages">{page > 1 ? <Link to={searchUrl(query, searchProvider!, page - 1)}><ChevronLeft size={16} />Previous</Link> : <span /> }<span>Page {page} of {lastPage}</span>{page * data.perPage < data.total && page < lastPage ? <Link to={searchUrl(query, searchProvider!, page + 1)}>Next<ChevronRight size={16} /></Link> : <span />}</nav>}
   </>}<Footer /></main>;
+}
+
+function BenchmarkPage() {
+  const [params, setParams] = useSearchParams();
+  const query = params.get('q') ?? '';
+  const [draft, setDraft] = useState(query);
+  const [formError, setFormError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const form = useRef<HTMLFormElement>(null);
+  const parsed = query ? BenchmarkQuerySchema.safeParse(Object.fromEntries(params)) : undefined;
+  const valid = parsed?.success === true;
+  const request = valid ? `/api/benchmarks/papers?${params}` : null;
+  const { data, loading, error } = useApi<BenchmarkResponse>(request, refresh);
+  const page = valid ? parsed.data.page : 1;
+  const lastPage = Math.min(100, Math.ceil((data?.total ?? 0) / 20));
+  useEffect(() => { setDraft(query); setFormError(''); }, [query]);
+  useEffect(() => { form.current?.reset(); }, [params]);
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const next = new URLSearchParams({ q: draft.trim() });
+    for (const [key, value] of new FormData(event.currentTarget)) {
+      if (key !== 'q' && typeof value === 'string' && value.trim()) next.set(key, value.trim());
+    }
+    if (!BenchmarkQuerySchema.safeParse(Object.fromEntries(next)).success) {
+      setFormError('Enter a benchmark name using letters, numbers, or name punctuation. Use years 1900–2100, with from year before to year.');
+      return;
+    }
+    setFormError(''); setParams(next); setRefresh(value => value + 1);
+  }
+  function pageLink(value: number) {
+    const next = new URLSearchParams(params); next.set('page', String(value));
+    return `/benchmarks?${next}`;
+  }
+  const filterError = query && parsed?.success === false ? 'This link has invalid benchmark filters. Update the form and search again.' : '';
+  const activeFilters = ['from', 'to', 'oa', 'pdf', 'keyword'].some(key => params.has(key)) || (params.get('evidence') ?? 'any') !== 'any' || (params.get('publication') ?? 'any') !== 'any';
+  return <main id="main" className="benchmark-page content-width">
+    <Link className="back-link" to="/"><ArrowLeft size={16} />Back to discovery</Link>
+    <BenchmarkNavigation />
+    <h1>Benchmark papers</h1>
+    <form ref={form} onSubmit={submit} className="benchmark-form" role="search" aria-label="Benchmark papers">
+      <label htmlFor="benchmark-query" className="benchmark-query-label">Benchmark</label>
+      <div className="benchmark-composer">
+        <Search size={20} aria-hidden="true" />
+        <input id="benchmark-query" name="q" maxLength={160} value={draft} onChange={event => setDraft(event.target.value)} placeholder="Enter any benchmark or dataset name" autoComplete="off" spellCheck={false} required />
+        <button className="primary" type="submit">Find papers <ArrowRight size={17} /></button>
+      </div>
+      <details className="benchmark-filter-panel" open>
+        <summary><Filter size={16} />Filters & sorting</summary>
+        <div className="benchmark-filters">
+          <label>Sort by<select key={`sort:${params.get('sort')}`} name="sort" defaultValue={params.get('sort') ?? 'newest'}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="citations">Most cited</option></select></label>
+          <label>Match evidence<select key={`evidence:${params.get('evidence')}`} name="evidence" defaultValue={params.get('evidence') ?? 'any'}><option value="any">All indexed text</option><option value="abstract">Title or abstract</option><option value="title">Title only</option></select></label>
+          <label>Publication<select key={`publication:${params.get('publication')}`} name="publication" defaultValue={params.get('publication') ?? 'any'}><option value="any">All papers</option><option value="conference">Conferences only</option><option value="journal">Journals only</option><option value="published">Published only (no preprints)</option></select></label>
+          <label>From year<input type="number" name="from" min="1900" max="2100" placeholder="Any" defaultValue={params.get('from') ?? ''} /></label>
+          <label>To year<input type="number" name="to" min="1900" max="2100" placeholder="Any" defaultValue={params.get('to') ?? ''} /></label>
+          <label className="benchmark-keyword">Additional keyword<input name="keyword" maxLength={160} placeholder="e.g. program repair" defaultValue={params.get('keyword') ?? ''} /></label>
+        </div>
+        <div className="benchmark-filter-actions">
+          <label><input type="checkbox" name="oa" value="1" defaultChecked={params.get('oa') === '1'} />Open access only</label>
+          <label><input type="checkbox" name="pdf" value="1" defaultChecked={params.get('pdf') === '1'} />PDF available</label>
+          <button className="secondary small" type="submit">Apply filters</button>
+          {activeFilters && <button className="text-button" type="button" onClick={() => { setFormError(''); setParams({ q: query }); }}>Clear filters</button>}
+        </div>
+      </details>
+      {(formError || filterError) && <p className="benchmark-error" role="alert">{formError || filterError}</p>}
+    </form>
+    {loading ? <Loading /> : error ? <div className="empty-state" role="alert"><Info size={28} /><h2>Benchmark search couldn’t load</h2><p>{error}</p><button className="secondary" onClick={() => setRefresh(value => value + 1)}>Try again</button></div> : data ? <>
+      <div className="benchmark-results-heading">
+        <div><h2>Papers mentioning {data.benchmark.name}</h2><p className="result-count">{exactNumber.format(data.total)} indexed matches{activeFilters ? ' with these filters' : ''}</p></div>
+        <DataBadge meta={data.meta} />
+      </div>
+      {data.benchmark.url && <a className="text-button" href={safeUrl(data.benchmark.url)} target="_blank" rel="noreferrer">Benchmark website <ExternalLink size={14} /></a>}
+      <details className="benchmark-coverage"><summary><Info size={16} />What these matches mean</summary><p>{data.meta.coverage}</p><p>Conference papers include workshop proceedings. Publication filters use OpenAlex metadata and may omit records with missing classifications. Published records may link to an arXiv PDF copy.</p></details>
+      {data.meta.warning && <div className="notice" role="status"><Info size={17} /><p>{data.meta.warning}</p></div>}
+      <div className="benchmark-results" aria-label="Benchmark paper results" aria-busy={loading}>
+        {data.results.length ? data.results.map(result => <PaperCard key={result.paper.id} paper={result.paper} detail={<div className={`benchmark-evidence evidence-${result.evidence.kind}`}>
+          <span className="benchmark-evidence-label">{result.evidence.kind === 'title' ? 'Title match' : result.evidence.kind === 'abstract' ? 'Abstract match' : 'Indexed match · usage unverified'}{['conference', 'journal', 'preprint'].includes(result.publication.kind) && <span className="benchmark-publication-kind">{result.publication.kind === 'conference' ? 'Conference paper' : result.publication.kind === 'journal' ? 'Journal paper' : 'Preprint'}</span>}{result.publicationDate && <time dateTime={result.publicationDate}>{result.publicationDate}</time>}</span>
+          {result.evidence.excerpt && <p>{result.evidence.excerpt}</p>}
+        </div>}><Link className="text-button" to={`/benchmarks/paper?id=${encodeURIComponent(result.paper.id)}`}>Find benchmarks</Link></PaperCard>) : <div className="empty-state"><Search size={32} /><h2>No matching papers</h2><p>Try another spelling or remove filters.</p></div>}
+      </div>
+      {(data.total > 20 || page > 1) && <nav className="pagination" aria-label="Benchmark result pages">
+        {page > 1 ? <Link to={pageLink(page - 1)}><ChevronLeft size={16} />Previous</Link> : <span />}
+        <span>Page {page}{lastPage > 0 && ` of ${lastPage}`}</span>
+        {page < lastPage ? <Link to={pageLink(page + 1)}>Next<ChevronRight size={16} /></Link> : <span />}
+      </nav>}
+      {data.total > 2000 && <p className="benchmark-help">Browsing is limited to 2,000 indexed matches. Narrow the year range to explore more.</p>}
+    </> : null}
+    <Footer />
+  </main>;
+}
+
+function BenchmarkNavigation() {
+  return <nav className="benchmark-navigation" aria-label="Benchmark discovery direction">
+    <NavLink end to="/benchmarks">By benchmark</NavLink>
+    <NavLink to="/benchmarks/paper">By paper</NavLink>
+  </nav>;
+}
+
+function PaperBenchmarkPage() {
+  const [params, setParams] = useSearchParams();
+  const query = params.get('q') ?? '';
+  const id = params.get('id');
+  const [draft, setDraft] = useState(query);
+  const [refresh, setRefresh] = useState(0);
+  const { data: search, loading: searching, error: searchError } = useApi<SearchResponse>(query && !id ? `/api/search?q=${encodeURIComponent(query)}&page=1&provider=openalex` : null, refresh);
+  const { data, loading, error } = useApi<PaperBenchmarksResponse>(id ? `/api/paper/${encodeURIComponent(id)}/benchmarks` : null, refresh);
+  useEffect(() => { setDraft(query); }, [query]);
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!draft.trim()) return;
+    setParams({ q: draft.trim() }); setRefresh(value => value + 1);
+  }
+  return <main id="main" className="benchmark-page content-width">
+    <Link className="back-link" to="/"><ArrowLeft size={16} />Back to discovery</Link>
+    <BenchmarkNavigation />
+    <h1>Benchmarks in a paper</h1>
+    <form className="benchmark-form" role="search" aria-label="Find a paper’s benchmarks" onSubmit={submit}>
+      <label className="benchmark-query-label" htmlFor="paper-benchmark-query">Paper title, DOI, or link</label>
+      <div className="benchmark-composer"><Search size={20} aria-hidden="true" />
+        <input id="paper-benchmark-query" value={draft} onChange={event => setDraft(event.target.value)} maxLength={200} placeholder="Search for a paper…" required />
+        <button className="primary" type="submit">Find paper <ArrowRight size={17} /></button>
+      </div>
+    </form>
+    {searching || loading ? <Loading /> : searchError || error ? <div className="empty-state" role="alert"><Info size={28} /><h2>Paper couldn’t load</h2><p>{searchError ?? error}</p><button className="secondary" onClick={() => setRefresh(value => value + 1)}>Try again</button></div> : data ? <>
+      {query && <Link className="back-link benchmark-paper-back" to={`/benchmarks/paper?q=${encodeURIComponent(query)}`}><ArrowLeft size={16} />Back to papers</Link>}
+      <div className="benchmark-results-heading"><h2>Selected paper</h2><DataBadge meta={data.meta} /></div>
+      {data.meta.warning && <div className="notice" role="status"><Info size={17} /><p>{data.meta.warning}</p></div>}
+      <PaperCard paper={data.paper} />
+      <div className="benchmark-results-heading"><h2>{data.benchmarks.length} {data.benchmarks.length === 1 ? 'benchmark or evaluation suite' : 'benchmarks and evaluation suites'}</h2></div>
+      <p className="benchmark-help">Checked: {data.coverage.fields.map(field => field === 'fulltext' ? 'paper full text' : field === 'artifact' ? 'author artifacts' : field).join(', ')}{!data.coverage.fields.includes('abstract') && ' · abstract unavailable'}. Results are source-backed candidates.</p>
+      {data.coverage.discovery.status !== 'complete' && <p className="benchmark-help" role="status">{data.coverage.fields.includes('fulltext') ? 'Some sources could not be checked.' : 'Full text could not be checked.'} Results may be incomplete.</p>}
+      <details className="benchmark-coverage"><summary><Info size={16} />Discovery coverage</summary><p>{data.coverage.discovery.limitations}</p>{data.coverage.discovery.sources.map((source, i) => <p key={`${source.url}:${i}`}><a href={safeUrl(source.url)} target="_blank" rel="noreferrer">{source.kind}</a> · {source.status === 'read' ? 'checked' : source.status === 'rejected' ? 'identity not verified' : 'unavailable'}</p>)}</details>
+      <div className="paper-benchmark-results" aria-label="Benchmarks found in paper">
+        {data.benchmarks.map(benchmark => <article className="paper-benchmark-card" key={`${benchmark.category}:${benchmark.name}`}>
+          <div className="paper-benchmark-heading"><h3>{benchmark.name}</h3>{benchmark.url && <a className="text-button" href={safeUrl(benchmark.url)} target="_blank" rel="noreferrer">Availability <ExternalLink size={14} /></a>}</div>
+          <div className={`benchmark-evidence evidence-${benchmark.evidence.kind}`}><span className="benchmark-evidence-label">{benchmark.category === 'suite' ? 'Evaluation suite' : 'Named benchmark'} · {benchmark.evidence.kind === 'title' ? 'Title' : benchmark.evidence.kind === 'abstract' ? 'Abstract' : benchmark.evidence.kind === 'fulltext' ? 'Paper full text' : 'Author artifact'}{benchmark.evidence.section && ` · ${benchmark.evidence.section}`}</span><p>{benchmark.evidence.excerpt}</p></div>
+          <a className="text-button" href={safeUrl(benchmark.evidence.sourceUrl)} target="_blank" rel="noreferrer">View evidence <ExternalLink size={14} /></a>
+          {!benchmark.url && <p className="benchmark-help">Availability link not found in checked sources.</p>}
+          {benchmark.category === 'named' && <Link className="text-button" to={`/benchmarks?q=${encodeURIComponent(benchmark.name)}`}>Papers mentioning {benchmark.name}<ArrowRight size={15} /></Link>}
+        </article>)}
+        {!data.benchmarks.length && <div className="empty-state"><FlaskConical size={28} /><h2>No benchmarks found in available data</h2><p>This does not mean the paper uses none. Check its evaluation section or author artifacts.</p><a className="secondary" href={safeUrl(data.paper.pdfUrl ?? data.paper.url)} target="_blank" rel="noreferrer">Open paper <ExternalLink size={15} /></a></div>}
+      </div>
+    </> : search ? <>
+      <div className="benchmark-results-heading"><h2>Choose a paper</h2><DataBadge meta={search.meta} /></div>
+      {search.meta.warning && <div className="notice" role="status"><Info size={17} /><p>{search.meta.warning}</p></div>}
+      {rankPapers(query, search.results).map(paper => <PaperCard key={paper.id} paper={paper}><Link className="secondary small" to={`/benchmarks/paper?${new URLSearchParams({ q: query, id: paper.id })}`}>Find benchmarks <ArrowRight size={15} /></Link></PaperCard>)}
+      {!search.results.length && <div className="empty-state"><Search size={28} /><h2>No matching papers</h2><p>Try a shorter title or DOI.</p></div>}
+    </> : null}
+    <Footer />
+  </main>;
 }
 
 function downloadFile(content: string, filename: string, type: string) {
@@ -380,6 +539,10 @@ function Workspace() {
       {fallback && <section className="jobs-banner" aria-label="Graph data fallback">
         <div className="jobs-content" role="status" aria-live="polite"><strong>{fallback.reason === 'openalex_unavailable' ? 'Showing Semantic Scholar: OpenAlex was unavailable.' : 'Showing Semantic Scholar: OpenAlex had limited connection data.'}</strong><p>{fallback.comparison.openalex ? `OpenAlex: ${exactNumber.format(fallback.comparison.openalex.nodes)} ${fallback.comparison.openalex.nodes === 1 ? 'paper' : 'papers'}, ${exactNumber.format(fallback.comparison.openalex.edges)} ${fallback.comparison.openalex.edges === 1 ? 'edge' : 'edges'}.` : 'OpenAlex: unavailable.'} {`Semantic Scholar: ${exactNumber.format(fallback.comparison.semanticScholar.nodes)} ${fallback.comparison.semanticScholar.nodes === 1 ? 'paper' : 'papers'}, ${exactNumber.format(fallback.comparison.semanticScholar.edges)} ${fallback.comparison.semanticScholar.edges === 1 ? 'edge' : 'edges'}.`}</p></div>
         <div className="jobs-actions"><Link className="secondary small" to={shareUrl}>Open canonical graph <ArrowRight size={15} /></Link></div>
+      </section>}
+      {!fallback && data.edges.length === 0 && <section className="jobs-banner" aria-label="Limited graph connections">
+        <div className="jobs-content" role="status"><strong>No indexed connections available</strong><p>Reference or citation data is missing. This does not mean the paper is unrelated to other research.</p></div>
+        <div className="jobs-actions"><button className="secondary small" onClick={() => setDialog('data')}>Review coverage</button></div>
       </section>}
       {data.meta.warning?.includes('Data integrity warning:') && <button className="integrity-notice" onClick={() => setDialog('data')}><Info size={16} /><span>Source metadata conflicts with the seed publication. Review before citing.</span><span className="integrity-more">Details <ChevronRight size={14} /></span></button>}
       <div className="mobile-pane-tabs" role="group" aria-label="Workspace panels"><button className={mobilePane === 'graph' ? 'active' : ''} onClick={() => setMobilePane('graph')}>{currentView === 'graph' ? <Network size={17} /> : <List size={17} />}{currentView === 'graph' ? 'Graph' : 'Results'}</button><button className={mobilePane === 'papers' ? 'active' : ''} onClick={() => setMobilePane('papers')}><Library size={17} />Papers ({filtered.length})</button><button className={mobilePane === 'details' ? 'active' : ''} onClick={() => setMobilePane('details')}><Info size={17} />Details</button></div>

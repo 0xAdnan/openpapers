@@ -12,6 +12,10 @@ import { doiIdentifier } from '../shared/identifiers.ts';
 import { ID_PATTERN, normalizeWork, OpenAlexProvider, ProviderError, workId } from './openalex.ts';
 import { CandidatePoolSchema as SharedCandidatePoolSchema, GraphResponseSchema as SharedGraphResponseSchema,
   PaperResponseSchema as SharedPaperResponseSchema, SearchResponseSchema as SharedSearchResponseSchema } from '../shared/schemas.ts';
+import { BenchmarkResponseSchema } from '../shared/benchmarks.ts';
+import { PublisherReferences, referenceDoi } from './publisher-references.ts';
+import { PdfReferences } from './pdf-references.ts';
+import { pdfUrl } from './pdf-download.ts';
 
 const oaPapers = (papers: Paper[]) => papers.every(p => ID_PATTERN.test(p.id) && p.references.every(id => ID_PATTERN.test(id)));
 // Bundled snapshots and persisted OpenAlex entries predate explicit provider metadata.
@@ -59,10 +63,14 @@ export class PaperService {
   private paperExpiry = new Map<string, number>();
   readonly ready: Promise<void>;
   readonly provider: OpenAlexProvider;
+  private readonly publisher: PublisherReferences;
+  private readonly pdf: PdfReferences;
 
   constructor(readonly cache: PersistentCache, readonly offline = false, provider?: OpenAlexProvider,
-    snapshotPath = fileURLToPath(new URL('../data/snapshot.json', import.meta.url))) {
+    snapshotPath = fileURLToPath(new URL('../data/snapshot.json', import.meta.url)), publisher?: PublisherReferences, pdf?: PdfReferences) {
     this.provider = provider ?? new OpenAlexProvider({ cache, offline, apiKey: process.env.PAPERS_API_KEY });
+    this.publisher = publisher ?? new PublisherReferences(cache);
+    this.pdf = pdf ?? new PdfReferences(cache);
     this.ready = this.load(snapshotPath);
   }
 
@@ -89,6 +97,11 @@ export class PaperService {
     for (const entry of await this.cache.list<unknown>('search:')) {
       const parsed = SearchResponseSchema.safeParse(entry.value);
       if (parsed.success) this.remember(parsed.data.results, { ...parsed.data.meta, source: 'cache' }, entry.expiresAt);
+    }
+    for (const entry of await this.cache.list<unknown>('benchmark:')) {
+      const parsed = BenchmarkResponseSchema.safeParse(entry.value);
+      if (parsed.success && staleAge(parsed.data.meta.fetchedAt)) this.remember(parsed.data.results.map(result => result.paper),
+        { ...parsed.data.meta, source: 'cache' }, entry.expiresAt);
     }
     for (const entry of await this.cache.list<unknown>('paper:')) {
       const parsed = PaperResponseSchema.safeParse(entry.value);
@@ -132,6 +145,11 @@ export class PaperService {
       const warning = paper && this.integrityMeta<DataMeta>({ source: 'snapshot', fetchedAt: this.snapshot.fetchedAt }, [paper]).warning;
       return warning ? { ...example, warning } : example;
     });
+  }
+
+  async localMetadata() {
+    await this.ready;
+    return [...this.papers.values()].map(paper => ({ paper, meta: this.paperMeta.get(paper.id)! }));
   }
 
   private async cached<T>(key: string, schema: z.ZodType<T>, stale = false) {
@@ -229,7 +247,10 @@ export class PaperService {
     signal.throwIfAborted();
     const key = `graph:v1:${origins.join(',')}`;
     const cached = await this.cached(key, GraphResponseSchema, this.offline);
-    const freshPools = origins.every(id => this.pools.some(g => g.origin === id && (this.poolExpiry.get(id) ?? 0) > Date.now()) || this.featured.has(id));
+    const needsRecovery = (pool: CandidatePool) => !this.offline && pool.papers.length === 1 &&
+      !pool.papers[0].references.length && !!referenceDoi(pool.papers[0].doi) &&
+      (!pool.referenceRecovery || pool.referenceRecovery !== 'bibliography-v2' && !!pdfUrl(pool.papers[0].pdfUrl));
+    const freshPools = origins.every(id => this.pools.some(g => g.origin === id && (this.poolExpiry.get(id) ?? 0) > Date.now() && !needsRecovery(g)) || this.featured.has(id));
     if (cached && cached.value.meta.algorithm === ALGORITHM && (this.offline || freshPools) && cached.value.origins.join(',') === origins.join(',')) return { ...cached.value, origins, meta: this.integrityMeta({ ...cached.value.meta, source: 'cache',
       ...(this.offline ? { warning: [cached.value.meta.warning, 'Offline: cached graph may be stale.'].filter(Boolean).join(' ') } : {}) }, [...cached.value.nodes, ...cached.value.prior, ...cached.value.derivative]) };
     return this.cache.deduplicate(key, async sharedSignal => {
@@ -242,7 +263,7 @@ export class PaperService {
       const fallbackWarnings: string[] = [];
       for (const id of origins) {
         operationSignal.throwIfAborted();
-        const exact = this.pools.find(g => g.origin === id && (this.poolExpiry.get(id) ?? 0) > Date.now());
+        const exact = this.pools.find(g => g.origin === id && (this.poolExpiry.get(id) ?? 0) > Date.now() && !needsRecovery(g));
         if (exact) {
           groups.push({ ...exact, source: 'cache' });
           expiresAt = Math.min(expiresAt, this.poolExpiry.get(id)!);
@@ -260,17 +281,20 @@ export class PaperService {
             if (error instanceof ProviderError && error.status === 404) throw new ApiError(404, `Paper ${id} not found`, 'origin_not_found');
             throw error;
           });
-          const group = await collectCandidates(this.provider, origin, operationSignal);
+          const group = await collectCandidates(this.provider, origin, operationSignal, this.publisher, this.pdf);
           operationSignal.throwIfAborted();
           groups.push(group);
           this.pools = this.pools.filter(g => g.origin !== id);
           this.pools.push(group);
           this.pools = this.pools.slice(-12);
-          this.poolExpiry.set(id, Date.now() + GRAPH_TTL);
+          const recovered = group.papers.find(p => p.id === id)?.references.length;
+          const ttl = group.coverage.includes('PDF title checks incomplete') || !recovered && /(?:Publisher|PDF) reference recovery unavailable/.test(group.coverage) ? 30000
+            : group.referenceRecovery ? 6 * 60 * 60 * 1000 : GRAPH_TTL;
+          this.poolExpiry.set(id, Date.now() + ttl);
           this.poolExpiry = new Map(this.pools.map(pool => [pool.origin, this.poolExpiry.get(pool.origin)!]));
           expiresAt = Math.min(expiresAt, this.poolExpiry.get(id)!);
           this.remember(group.papers, { source: group.source, fetchedAt: group.fetchedAt }, this.poolExpiry.get(id));
-          await this.cache.set(`pool:${id}`, group, GRAPH_TTL);
+          await this.cache.set(`pool:${id}`, group, ttl);
           live ||= group.source === 'live';
           continue;
         } catch (error) {

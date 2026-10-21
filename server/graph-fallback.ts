@@ -8,6 +8,7 @@ import type { SemanticService } from './semantic-service.ts';
 import { normalizeSemanticPaper, semanticLookup } from './semantic-scholar.ts';
 import { ApiError, type PaperService } from './service.ts';
 import { SemanticScholarError } from './semantic-scholar.ts';
+import { createHash } from 'node:crypto';
 
 export function graphCoverage(graph: GraphResponse) {
   const nodes = new Set(graph.nodes.map(p => p.id));
@@ -47,10 +48,12 @@ function arxivAlias(value: string) {
 }
 
 export class GraphFallbackCoordinator {
+  private memo = new Map<string, { expiresAt: number; graph?: GraphResponse }>();
+  private cooldownUntil = 0;
   constructor(private readonly openalex: Pick<PaperService, 'graph' | 'paper'>,
     private readonly semantic: Pick<SemanticService, 'graph' | 'search'> & {
       provider: Pick<SemanticService['provider'], 'getPaper'>;
-    }, private readonly enabled = false) {}
+    }, private readonly enabled = false, private readonly options: { timeoutMs?: number; cooldownMs?: number } = {}) {}
 
   async graph(origins: string[], signal?: AbortSignal): Promise<GraphResponse> {
     signal?.throwIfAborted();
@@ -69,6 +72,28 @@ export class GraphFallbackCoordinator {
       originalError = error;
     }
     if (original && (!this.enabled || original.nodes.length > 3 && original.edges.length > 0)) return original;
+
+    const key = createHash('sha256').update(JSON.stringify({ origins, nodes: original?.nodes,
+      edges: original?.edges, fetchedAt: original?.meta.fetchedAt, algorithm: original?.meta.algorithm })).digest('hex');
+    const cached = this.memo.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      if (cached.graph) return { ...cached.graph, meta: { ...cached.graph.meta, source: 'cache' } };
+      if (original) return original;
+      throw originalError;
+    }
+    if (this.cooldownUntil > Date.now()) {
+      if (original) return original;
+      throw originalError;
+    }
+    // Optional enrichment must not hold an already usable OA graph for a full service deadline.
+    const callerSignal = signal;
+    const budget = AbortSignal.timeout(this.options.timeoutMs ?? 5000);
+    signal = AbortSignal.any([...(signal ? [signal] : []), budget]);
+    const remember = (graph?: GraphResponse) => {
+      this.memo.delete(key);
+      this.memo.set(key, { graph, expiresAt: Date.now() + (graph ? 5 * 60000 : this.options.cooldownMs ?? 60000) });
+      while (this.memo.size > 128) this.memo.delete(this.memo.keys().next().value!);
+    };
 
     let phase = 'metadata';
     try {
@@ -128,7 +153,7 @@ export class GraphFallbackCoordinator {
           !(semanticScholar.nodes > openalex.nodes || semanticScholar.edges > openalex.edges || semanticScholar.connectedOrigins > openalex.connectedOrigins))) {
         throw new Error('Semantic Scholar graph does not improve coverage');
       }
-      return { ...alternative, meta: { ...alternative.meta,
+      const result: GraphResponse = { ...alternative, meta: { ...alternative.meta,
         warning: [alternative.meta.warning,
           original ? 'OpenAlex has limited graph connections; showing an independently resolved Semantic Scholar graph.'
             : 'OpenAlex graph connections are unavailable; showing an independently resolved Semantic Scholar graph.',
@@ -137,13 +162,19 @@ export class GraphFallbackCoordinator {
         fallback: { from: 'openalex', requestedOrigins: origins, resolvedOrigins: resolved,
           reason: original ? 'limited_connections' : 'openalex_unavailable', comparison: { openalex, semanticScholar } },
       } };
+      remember(result);
+      return result;
     } catch (error) {
-      signal?.throwIfAborted();
-      if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) throw error;
+      callerSignal?.throwIfAborted();
+      if (!budget.aborted && error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) throw error;
       const reason = error instanceof SemanticScholarError && error.message.includes('rate gate') ? 'rate_gate_unavailable'
         : error instanceof SemanticScholarError ? `upstream_${error.status}`
         : error instanceof ApiError ? `service_${error.status}` : 'identity_or_coverage';
       console.warn('Graph fallback unavailable:', phase, reason);
+      remember();
+      if (budget.aborted || error instanceof SemanticScholarError && [429, 503].includes(error.status) || error instanceof ApiError && error.status === 503) {
+        this.cooldownUntil = Date.now() + (this.options.cooldownMs ?? 60000);
+      }
       if (original) return original;
       throw originalError;
     }

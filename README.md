@@ -5,147 +5,70 @@
 <h1 align="center">Open Papers</h1>
 
 <p align="center">
-  Open-source literature discovery with visual graphs of related research.
+  Discover research papers, explore their connections, and find their evaluation datasets.
   <br />
-  <a href="https://openpapers.si">Live demo</a> ·
-  <a href="#run">Run locally</a> ·
-  <a href="#configuration">Configuration</a>
+  <a href="https://openpapers.si">Open the app</a> ·
+  <a href="https://openpapers.si/benchmarks">Explore benchmarks</a> ·
+  <a href="https://github.com/0xAdnan/openpapers/issues">Report an issue</a>
 </p>
 
 ---
 
-Open Papers is an independent, MIT-licensed research tool: a React frontend and Express backend that search open scholarly metadata and build interactive graphs of related papers. No login, analytics, or paid limits.
+Open Papers is an independent, open-source literature discovery tool. Search for a paper, build a graph of related research, or explore the benchmarks and datasets described in its evaluation. No account is required.
 
-If you find it useful, [star the repository](https://github.com/0xAdnan/openpapers) — it helps others discover the project.
+## What you can do
 
-> Data comes from upstream sources and is not independently verified. Check the source publication before citing.
+- **Find papers:** search by title, keyword, or DOI with fuzzy-tolerant suggestions and pagination.
+- **Explore connections:** interactive graphs show related research, citation links, prior work, and derivative papers. Nodes are colored by year and sized by citation count.
+- **Compare research:** start from up to three papers, re-center on another paper, and filter by keyword, year, open access, or PDF availability.
+- **Discover benchmarks in both directions:** find papers mentioning a benchmark, or find source-backed benchmarks and custom evaluation suites in a selected paper.
+- **Keep your reading list:** save papers locally and export BibTeX, CSV, or JSON.
+- **Use it on different devices:** responsive layouts, keyboard navigation, and reduced-motion support.
 
-## Features
+## Latest improvements · October 21, 2026
 
-- Search by title, keyword, or DOI, with fuzzy-tolerant autocomplete and pagination.
-- Force-directed graphs colored by publication year and sized by citations, with pan, zoom, and selection paths.
-- Prior and derivative works, sortable paper tables, and abstract/detail panels.
-- Keyword, year, open-access, and PDF filters saved in the URL.
-- Up to three origin papers per graph; re-center on any paper.
-- Local saved library with BibTeX, CSV, and JSON exports.
-- Responsive layout, keyboard navigation, and reduced-motion support.
-- Works offline with three bundled example graphs.
+### Benchmark discovery beyond a predefined list
 
-## Run
+**By benchmark**, enter any benchmark or dataset name—even a simple request such as “the benchmark is defects 4j.” Results are newest-first by default, with publication, year, access, PDF, and keyword filters. Conference-only results include workshop proceedings; published-only results exclude preprint records without excluding published papers that link to an arXiv PDF.
 
-Requires Node.js 22.19+.
+**By paper**, select a publication to discover named benchmarks and custom repository or project suites from its metadata, accessible full text, and verified author artifacts. There is no fixed benchmark-name catalog or paper-specific detection rule.
 
-```sh
-npm ci
-npm run dev        # http://localhost:5173 (API on :3001)
-```
+By-paper candidates show an evidence excerpt and a source link. Availability links come from the checked sources or verified suite artifacts; missing links are shown explicitly rather than guessed.
 
-Production build:
+For example, **SPECULATE** now exposes its 19-repository evaluation suite, the Java and Django subsets, and the Respector dataset instead of returning an empty catalog match.
 
-```sh
-npm run build
-npm start          # http://127.0.0.1:3001
-```
+### Recovering missing graph connections
 
-Offline mode (bundled examples only):
+When indexed references are missing, graphs can recover structured references from publisher metadata and, when needed, an accessible paper PDF. Recovered references require unique identifier or title/year/author matches; conflicting or ambiguous entries are excluded.
 
-```sh
-OFFLINE=1 npm run dev
-```
+Sparse graphs can also fall back to a verified record of the same publication in Semantic Scholar when it improves connection coverage. The graph identifies its actual source, and provider IDs are not mixed.
 
-Docker:
+### Less waiting, clearer coverage
 
-```sh
-docker build -t open-papers .
-docker run --rm -p 3001:3001 -e OFFLINE=1 open-papers
-```
+Independent graph lookups run concurrently, duplicate requests share work, and cached results avoid repeated retrieval. Optional fallback has a short time budget and an outage cooldown so it does not repeatedly hold up an otherwise usable graph.
 
-## Configuration
+Connection and benchmark views explain what was checked, which sources were unavailable, and where results may be incomplete. Cold requests can still take several seconds.
 
-Set these as server environment variables. See [`.env.example`](.env.example).
+## What the results mean
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PAPERS_API_KEY` | unset | Optional key for a larger metadata API quota |
-| `S2_API_KEY` | unset | Enables Semantic Scholar search and validated sparse-graph fallback |
-| `OFFLINE` | `0` | `1` disables all provider requests |
-| `PORT` | `3001` | Backend port |
-| `HOST` | `127.0.0.1` | Use `0.0.0.0` behind a container or proxy |
+- **A mention is not proof of use.** Benchmark search finds indexed mentions, including citations. Check the paper's evaluation before treating it as a benchmark user.
+- **By-paper results are source-backed candidates, not exhaustive inventories.** Text extraction can miss unusual names or misinterpret ambiguous prose. Custom suites and their subsets can overlap.
+- **Empty does not mean none.** Paywalls, scanned PDFs, unusual formatting, unlinked artifacts, and indexing gaps can hide benchmarks or connections.
+- **Graphs are sampled neighborhoods, not the entire literature.** Citation-ranked sampling can favor influential papers, and missing metadata affects coverage. Durable expansion can have less reference coverage than a recovered quick graph.
+- **No benchmark scores, rankings, or SOTA claims are inferred.** Always check the original publication before citing.
 
-Never expose API keys through `VITE_*` variables.
+PDF and artifact retrieval is bounded and read-only. Downloads reject private network addresses and redirects; PDF parsing is isolated, with size, page, and time limits. Repository code and artifact commands are never executed. Offline mode uses bundled examples and previously cached data without contacting providers.
 
-### Graph Data Fallback
+## Sources and project
 
-OpenAlex remains the default search and graph source. Automatic graph requests with
-three or fewer displayed papers, no edges, or eligible provider failures can resolve
-the same publication in Semantic Scholar. A fallback requires a unique verified
-DOI, arXiv, or title/year/author match and improved connection coverage. More papers
-are not proof of better relevance, and provider IDs are not mixed in one graph.
+Paper metadata comes primarily from **OpenAlex**, with **Semantic Scholar** for supported search and graph fallback. **Crossref**, **DataCite**, accessible PDFs, and verified author artifacts support reference recovery and benchmark discovery.
 
-The graph labels its actual source and fallback reason. Shared links use canonical
-Semantic Scholar IDs for S2 results. Explicit API requests with
-`provider=openalex` stay OpenAlex-only for comparison. Persistent expansion jobs
-remain OpenAlex-based and cannot overwrite a displayed S2 fallback.
+The app uses a React frontend and Express API deployed together on Vercel. Automated checks cover backend behavior, disposable PostgreSQL integration, production packaging, and browser workflows.
 
-Partial reference neighborhoods remain usable when optional citation/hydration
-requests fail. Coverage text identifies missing data, and partial caches expire
-so later requests can attempt a fuller neighborhood.
+Found a missing result or unexpected connection? [Open an issue](https://github.com/0xAdnan/openpapers/issues) with the paper link and what you expected to see.
 
-Semantic Scholar keys are sent only through the server-side `x-api-key` header.
-All endpoints share a key-based limiter: one active request, at least 1,250 ms
-after completion, and shared `Retry-After` cooldowns. On Vercel, Supabase's private
-`semantic_api_budget` and `semantic_cache` tables coordinate rate limits and share
-validated S2 responses across serverless instances without renewing original TTLs.
-Apply migrations with `make migrate` before enabling this mode. The tables never
-store raw API keys. Cached graphs validate the active scoring algorithm version,
-cap outage fallbacks at 30 days with an explicit age warning, and allow completed
-research jobs older than one hour to be refreshed without breaking shared job links.
-
-S2 data/API terms are separate from the application's MIT license. No S2 corpus
-or temporary research capture is bundled with this repository.
-
-## Development
-
-### Make Commands
-
-```sh
-make dev                 # frontend + backend, loading .env when present
-make check               # backend tests, production build, then browser tests
-make deploy              # frontend + API deployment; Vercel builds remotely
-make deploy-prebuilt     # local Vercel build and prebuilt upload
-make deploy-checked      # full verification before production deployment
-make worker              # durable graph acquisition worker
-make migrate             # apply database migrations explicitly
-make help                # all available targets
-```
-
-The frontend and API deploy together in one Vercel project. `make deploy-frontend`
-and `make deploy-backend` are aliases for that same deployment. Database migrations
-are separate and never run automatically during deployment. `make push` pushes
-existing commits; it does not create a commit or deploy automatically.
-
-Run `make link` once on a new checkout and authenticate with Vercel. Override the
-target with `VERCEL_SCOPE=... VERCEL_PROJECT=...`. The prebuilt workflow downloads
-environment configuration under the ignored `.vercel/` directory; never publish it.
-
-```sh
-npm test               # backend tests
-npm run test:e2e       # browser tests (Playwright)
-npm run data:refresh   # rebuild the bundled paper snapshot
-```
-
-| Path | Purpose |
-| --- | --- |
-| `src/` | React app and graph renderer |
-| `server/` | API, providers, cache, and scoring |
-| `shared/` | Shared types, schemas, and fuzzy matching |
-| `data/` | Bundled paper snapshot and provenance |
-| `scripts/` | Data refresh, build, and migration scripts |
-| `supabase/` | Supabase migrations and cron schedule |
-| `tests/` | End-to-end and integration tests |
-| `docs/` | Documentation and assets |
-| `rea/` | Local-only user-added toolkit, excluded from git |
+If Open Papers is useful to you, [star the repository](https://github.com/0xAdnan/openpapers).
 
 ## License
 
-Source code is released under the [MIT License](LICENSE).
+Source code is released under the [MIT License](LICENSE). Upstream data and API terms remain separate from the application license.

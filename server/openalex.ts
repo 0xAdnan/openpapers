@@ -12,6 +12,8 @@ export interface OpenAlexWork {
   display_name?: string | null;
   doi?: string | null;
   publication_year?: number | null;
+  publication_date?: string | null;
+  type?: string | null;
   authorships?: { author?: { display_name?: string } }[];
   primary_location?: Location | null;
   best_oa_location?: Location | null;
@@ -24,7 +26,9 @@ export interface OpenAlexWork {
 }
 
 interface Location {
-  source?: { display_name?: string } | null;
+  source?: { display_name?: string; type?: string } | null;
+  raw_source_name?: string | null;
+  is_published?: boolean | null;
   landing_page_url?: string | null;
   pdf_url?: string | null;
 }
@@ -84,7 +88,7 @@ export function normalizeWork(work: OpenAlexWork): Paper {
     title: work.display_name?.slice(0, 2000) || 'Untitled work',
     authors: (work.authorships ?? []).slice(0, 100).flatMap(a => a.author?.display_name ? [a.author.display_name.slice(0, 300)] : []),
     year: Number.isInteger(work.publication_year) ? work.publication_year! : null,
-    venue: work.primary_location?.source?.display_name?.slice(0, 500) ?? '',
+    venue: (work.primary_location?.source?.display_name || work.primary_location?.raw_source_name)?.slice(0, 500) ?? '',
     citations: Math.max(0, Number.isFinite(work.cited_by_count) ? work.cited_by_count! : 0),
     references,
     abstract: words.filter(Boolean).join(' ').slice(0, 30000),
@@ -161,7 +165,7 @@ export class OpenAlexProvider {
     else this.active--;
   }
 
-  async request<T extends WorksPage | OpenAlexWork>(path: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
+  async request<T extends WorksPage | OpenAlexWork>(path: string, params: Record<string, string> = {}, signal?: AbortSignal, cacheTtlMs?: number): Promise<T> {
     signal?.throwIfAborted();
     // No redirects and no caller-supplied origins: only these fixed provider routes.
     if (path !== '/works' && !/^\/works\/W[1-9]\d{0,14}$/.test(path)) throw new ProviderError(400, 'Invalid provider path');
@@ -181,7 +185,7 @@ export class OpenAlexProvider {
         page.results.every(work => !!workId(work?.id));
     };
     const cached = await this.options.cache.get<T>(key, this.options.offline);
-    if (cached && valid(cached.value)) {
+    if (cached && valid(cached.value) && (cacheTtlMs === undefined || Date.now() - Date.parse(cached.storedAt) < cacheTtlMs)) {
       const original = await this.options.cache.get<Acquisition>(`provenance:${key}`, true);
       const acquisition = original && typeof original.value?.fetchedAt === 'string' && Number.isFinite(Date.parse(original.value.fetchedAt))
         ? original.value : undefined;
@@ -267,7 +271,7 @@ export class OpenAlexProvider {
           creditsUsed: response.headers.get('x-ratelimit-credits-used'),
         };
         this.record(data, acquisition, 'live');
-        await this.options.cache.set(key, data);
+        await this.options.cache.set(key, data, cacheTtlMs);
         await this.options.cache.set(`provenance:${key}`, acquisition);
         return data;
       } catch (error) {

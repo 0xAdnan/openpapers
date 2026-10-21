@@ -7,7 +7,7 @@
   "functions": {
     "api/index.mjs": {
       "maxDuration": 90,
-      "includeFiles": "{.generated/server.mjs,data/{snapshot,integrity-audit,featured}.json}",
+      "includeFiles": "{.generated/{server,pdf-text-worker}.mjs,data/{snapshot,integrity-audit,featured}.json,node_modules/pdfjs-dist/legacy/build/{pdf,pdf.worker}.mjs}",
       "excludeFiles": "{.cache/**,rea/**,test-results/**,server/*.test.ts}"
     }
   },
